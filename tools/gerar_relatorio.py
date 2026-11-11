@@ -112,7 +112,7 @@ story.append(para(T.EXPERIMENTOS_INTRO))
 tab = [["Exp.", "Modificação", "Loss\ntreino", "Loss\nval.", "Acc.\ntreino", "Acc.\nval.", "Acc.\nteste",
         "Δ val.", "Resultado"]]
 for r in rows:
-    pai = T.PAI.get(r["exp"])
+    pai = r.get("pai")
     d = "—" if pai is None else f"{100 * (r['val_acc'] - rows[pai - 1]['val_acc']):+.2f} pp".replace(".", ",")
     tab.append([f"E{r['exp']}", para(r["modificacao"], SMALL), num(r["train_loss"]), num(r["val_loss"]),
                 pct(r["train_acc"]), pct(r["val_acc"]), pct(r["test_acc"]), d, para(T.VEREDITO[r["exp"]], SMALL)])

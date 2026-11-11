@@ -22,7 +22,7 @@ Notebook com a implementação e todos os experimentos do trabalho. Ele é autos
 `svhn_lib.py` (modelos, laço de treino, avaliação, gráficos e predição) e as demais executam os experimentos.
 
 **Como rodar**
-- **Local:** `jupyter notebook trabalho_svhn.ipynb` (roda em CPU; cerca de 4 h no total).
+- **Local:** `jupyter notebook trabalho_svhn.ipynb` (roda em CPU; cerca de 4 a 5 h no total).
 - **Colab:** basta abrir este notebook e executar tudo (ative a GPU em *Ambiente de execução → Alterar tipo*).
 
 **Protocolo**
@@ -131,7 +131,7 @@ a cada época**, fica com os pesos da melhor época na validação, mede a acur�
 code(r"""
 RESULTS, REGISTRY = [], {}
 
-def run(exp_id, nome, modificacao, make_model, dados='norm', **train_kw):
+def run(exp_id, nome, modificacao, make_model, dados='norm', pai=None, **train_kw):
     print(f'=== E{exp_id}: {nome} ===')
     REGISTRY[exp_id] = (make_model, dados, train_kw)
     L.set_seed(SEED)
@@ -141,7 +141,7 @@ def run(exp_id, nome, modificacao, make_model, dados='norm', **train_kw):
     hist = L.train_model(model, data, seed=SEED, device=device, **train_kw)
     test_loss, test_acc = L.evaluate(model, data['X_test'], data['y_test'], device=device)
     b = hist['best_epoch']
-    row = dict(exp=exp_id, nome=nome, modificacao=modificacao, dados=dados,
+    row = dict(exp=exp_id, nome=nome, modificacao=modificacao, dados=dados, pai=pai,
                params=L.count_params(model), epocas=train_kw['epochs'], melhor_epoca=b + 1,
                train_loss=hist['train_loss'][b], val_loss=hist['val_loss'][b],
                train_acc=hist['train_acc'][b], val_acc=hist['val_acc'][b],
@@ -160,9 +160,9 @@ def run(exp_id, nome, modificacao, make_model, dados='norm', **train_kw):
 md(r"""
 ## 3. Experimentos
 
-Cada experimento muda **um fator** em relação ao anterior (indicado no título), para que a melhora ou a piora possa
-ser atribuída a ele. Os experimentos de taxa de aprendizado (E4 e E5) são variações do E3; os seguintes continuam
-a partir do E3, que ficou com a melhor taxa.
+Cada experimento muda **um fator** em relação a um experimento anterior (o "pai", indicado em cada um), para que a
+melhora ou a piora possa ser atribuída a esse fator. Quando duas ou mais alternativas são comparadas (taxa de
+aprendizado, tamanho do batch), o código segue automaticamente com a de **maior acurácia de validação**.
 """)
 
 md(r"""
@@ -184,14 +184,14 @@ e entrada apenas em [0, 1].
 """)
 code(r"""
 run(2, 'MLP baseline', 'MLP 2×500, entrada em [0,1]',
-    lambda: L.MLP([500, 500]), dados='bruto',
+    lambda: L.MLP([500, 500]), dados='bruto', pai=1,
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
 md("### E3 — E2 + normalização por canal")
 code(r"""
 run(3, 'MLP + normalização', 'E2 + normalização (média/desvio por canal)',
-    lambda: L.MLP([500, 500]), dados='norm',
+    lambda: L.MLP([500, 500]), dados='norm', pai=2,
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
@@ -201,12 +201,12 @@ Mesmo modelo do E3, mudando só a taxa de aprendizado: 1e-2 (E4) e 1e-4 (E5).
 """)
 code(r"""
 run(4, 'MLP lr alta (1e-2)', 'E3 com lr = 1e-2',
-    lambda: L.MLP([500, 500]), dados='norm',
+    lambda: L.MLP([500, 500]), dados='norm', pai=3,
     epochs=25, batch_size=100, lr=1e-2);
 """)
 code(r"""
 run(5, 'MLP lr baixa (1e-4)', 'E3 com lr = 1e-4',
-    lambda: L.MLP([500, 500]), dados='norm',
+    lambda: L.MLP([500, 500]), dados='norm', pai=3,
     epochs=25, batch_size=100, lr=1e-4);
 """)
 code(r"""
@@ -224,68 +224,108 @@ plt.suptitle('Efeito da taxa de aprendizado (MLP 2×500 normalizada)'); plt.tigh
 plt.savefig('resultados/comparacao_lr.png', dpi=130); plt.show()
 """)
 
-md("### E6 — E3 + mais camadas e neurônios (1024 → 512 → 256)")
+md(r"""
+**Qual taxa de aprendizado seguir usando?** Os próximos experimentos partem do melhor dos três (E3, E4, E5)
+segundo a acurácia de validação. A escolha é feita pelo código, não à mão.
+""")
 code(r"""
-run(6, 'MLP maior', 'E3 com 3 camadas ocultas: 1024-512-256',
-    lambda: L.MLP([1024, 512, 256]), dados='norm',
-    epochs=25, batch_size=100, lr=1e-3);
+def melhor(*exps):
+    "Experimento com a maior acurácia de validação entre os indicados."
+    return max((r for r in RESULTS if r['exp'] in exps), key=lambda r: r['val_acc'])
+
+B_LR = melhor(3, 4, 5)
+LR = B_LR['config']['lr']
+print(f"Melhor taxa na validação: lr = {LR:g} (E{B_LR['exp']}, val_acc = {B_LR['val_acc']:.4f}).")
+print(f"Os próximos experimentos partem do E{B_LR['exp']}.")
 """)
 
-md("### E7 — E6 + Dropout 0,3")
+md("### E6 — mais camadas e neurônios (1024 → 512 → 256)")
 code(r"""
-run(7, 'MLP + dropout', 'E6 + dropout 0,3',
-    lambda: L.MLP([1024, 512, 256], dropout=0.3), dados='norm',
-    epochs=25, batch_size=100, lr=1e-3);
-""")
-
-md("### E8 — E7 + Batch Normalization")
-code(r"""
-run(8, 'MLP + dropout + BN', 'E7 + BatchNorm',
-    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm',
-    epochs=25, batch_size=100, lr=1e-3);
+run(6, 'MLP maior', f"E{B_LR['exp']} com 3 camadas ocultas: 1024-512-256",
+    lambda: L.MLP([1024, 512, 256]), dados='norm', pai=B_LR['exp'],
+    epochs=25, batch_size=100, lr=LR);
 """)
 
 md(r"""
-### E9 — E8 com batch 256 (em vez de 100)
+### E7 — E6 + Dropout 0,3
+Regularização vista em aula: a cada passo de treino, 30% dos neurônios de cada camada oculta são zerados.
+""")
+code(r"""
+run(7, 'MLP + dropout', 'E6 + dropout 0,3',
+    lambda: L.MLP([1024, 512, 256], dropout=0.3), dados='norm', pai=6,
+    epochs=25, batch_size=100, lr=LR);
+""")
+
+md(r"""
+### E8 — E7 + Batch Normalization
+Normaliza as ativações de cada camada oculta dentro do mini-batch (a mesma ideia da normalização da entrada,
+aplicada dentro da rede).
+""")
+code(r"""
+run(8, 'MLP + dropout + BN', 'E7 + BatchNorm',
+    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm', pai=7,
+    epochs=25, batch_size=100, lr=LR);
+""")
+
+md(r"""
+### E9 — E8 com a outra taxa de aprendizado
+A BatchNorm muda a escala das ativações e costuma permitir taxas maiores, então a taxa escolhida antes (sem BN)
+pode não ser mais a melhor. Repetimos o E8 trocando só a taxa (1e-3 ↔ 1e-4) e seguimos com a melhor das duas.
+""")
+code(r"""
+LR_ALT = 1e-3 if LR != 1e-3 else 1e-4
+run(9, f'MLP + BN, lr {LR_ALT:g}', f'E8 com lr = {LR_ALT:g}',
+    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm', pai=8,
+    epochs=25, batch_size=100, lr=LR_ALT);
+B_BN = melhor(8, 9)
+print(f"\nCom BatchNorm, a melhor taxa na validação é lr = {B_BN['config']['lr']:g} (E{B_BN['exp']}). Seguimos a partir dele.")
+""")
+
+md(r"""
+### E10 — batch 256 (em vez de 100)
 Batch maior: gradiente menos ruidoso, mas menos atualizações por época.
 """)
 code(r"""
-run(9, 'MLP batch 256', 'E8 com batch 256',
-    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm',
-    epochs=25, batch_size=256, lr=1e-3);
+run(10, 'MLP batch 256', f"E{B_BN['exp']} com batch 256",
+    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm', pai=B_BN['exp'],
+    **dict(B_BN['config'], batch_size=256));
+B_BATCH = melhor(B_BN['exp'], 10)
+print(f"\nMelhor tamanho de batch na validação: {B_BATCH['config']['batch_size']} (E{B_BATCH['exp']}). Seguimos a partir dele.")
 """)
 
 md(r"""
-### E10 — E9 + taxa de aprendizado com decaimento cosseno
-A taxa começa em 1e-3 e cai suavemente até zero: passos grandes no início e ajuste fino no fim.
+### E11 — taxa de aprendizado com decaimento cosseno
+A taxa começa no valor escolhido e cai suavemente até zero: passos grandes no início e ajuste fino no fim.
 """)
 code(r"""
-run(10, 'MLP + lr cosseno', 'E9 + decaimento cosseno da lr',
-    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm',
-    epochs=25, batch_size=256, lr=1e-3, scheduler='cosine');
+run(11, 'MLP + lr cosseno', f"E{B_BATCH['exp']} + decaimento cosseno da lr",
+    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm', pai=B_BATCH['exp'],
+    **dict(B_BATCH['config'], scheduler='cosine'));
+B_MLP = melhor(*range(2, 12))
+print(f"\nMelhor MLP na validação: E{B_MLP['exp']} — {B_MLP['nome']} (val_acc = {B_MLP['val_acc']:.4f}, test_acc = {B_MLP['test_acc']:.4f})")
 """)
 
 md(r"""
-### E11 — CNN (rede convolucional)
+### E12 — CNN (rede convolucional)
 O enunciado deixa a arquitetura livre e cita o "número de filtros". A MLP trata cada pixel como uma entrada
 independente; a convolução aplica os mesmos filtros em toda a imagem e aproveita a vizinhança dos pixels.
 Arquitetura: 3 blocos convolucionais (32 → 64 → 128 filtros 3×3, BatchNorm, ReLU, max-pool) e um classificador
-totalmente conectado com dropout 0,3. Treino: Adam, lr 1e-3 com decaimento cosseno, batch 128.
+totalmente conectado com dropout 0,3. Treino: Adam, lr 1e-3 com decaimento cosseno, batch 128, 20 épocas.
 """)
 code(r"""
-run(11, 'CNN', 'CNN 3 blocos conv (32-64-128 filtros)',
-    lambda: L.CNN(dropout=0.3), dados='norm',
+run(12, 'CNN', 'CNN 3 blocos conv (32-64-128 filtros)',
+    lambda: L.CNN(dropout=0.3), dados='norm', pai=B_MLP['exp'],
     epochs=20, batch_size=128, lr=1e-3, scheduler='cosine');
 """)
 
 md(r"""
-### E12 — E11 + data augmentation
+### E13 — E12 + data augmentation
 Translação aleatória de até 2 pixels em cada imagem de treino. Não usamos espelhamento horizontal, que muda o
 significado de alguns dígitos.
 """)
 code(r"""
-run(12, 'CNN + augmentation', 'E11 + translação aleatória de ±2 px',
-    lambda: L.CNN(dropout=0.3), dados='norm',
+run(13, 'CNN + augmentation', 'E12 + translação aleatória de ±2 px',
+    lambda: L.CNN(dropout=0.3), dados='norm', pai=12,
     epochs=20, batch_size=128, lr=1e-3, scheduler='cosine', augment_shift=2);
 """)
 
@@ -307,7 +347,7 @@ for r in RESULTS:
 ax[0].set(title='Acurácia de validação por época', xlabel='época', ylabel='acurácia')
 ax[1].set(title='Loss de validação por época', xlabel='época', ylabel='loss', ylim=(0, 2.5))
 for a in ax: a.grid(alpha=.3)
-ax[0].legend(fontsize=7, ncol=2); plt.tight_layout(); plt.savefig('resultados/comparacao_validacao.png', dpi=130); plt.show()
+ax[0].legend(fontsize=6.5, ncol=2); plt.tight_layout(); plt.savefig('resultados/comparacao_validacao.png', dpi=130); plt.show()
 """)
 
 md(r"""

@@ -162,3 +162,32 @@ def test_predict_retorna_inteiros(tmp_path):
     preds = L.predict(model, torch.randn(5, 3, 32, 32), batch_size=2)
     assert preds.shape == (5,) and preds.dtype == torch.int64
     assert int(preds.min()) >= 0 and int(preds.max()) <= 9
+
+
+# ---------- retreino final (treino + validação, sem conjunto de validação) ----------
+
+def test_treino_sem_validacao_fica_com_pesos_da_ultima_epoca():
+    data = _dados_sinteticos()
+    data = {"X_train": data["X_train"], "y_train": data["y_train"]}
+    L.set_seed(0)
+    model = L.MLP([32])
+    hist = L.train_model(model, data, epochs=3, batch_size=16, lr=1e-3, verbose=False)
+    assert len(hist["train_loss"]) == 3 and len(hist["train_acc"]) == 3
+    assert hist["val_loss"] == [] and hist["val_acc"] == []
+    assert hist["best_epoch"] == 2 and hist["best_val_acc"] is None
+
+
+def test_plot_history_funciona_sem_validacao(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg")
+    hist = {"train_loss": [1.0, 0.5], "train_acc": [0.5, 0.8], "val_loss": [], "val_acc": [],
+            "best_epoch": 1, "best_val_acc": None}
+    L.plot_history(hist, "x", tmp_path / "f.png")
+    assert (tmp_path / "f.png").exists()
+
+
+def test_matriz_de_confusao():
+    y = torch.tensor([0, 0, 1, 2, 2, 2])
+    p = torch.tensor([0, 1, 1, 2, 2, 0])
+    cm = L.confusion_matrix(y, p, n_classes=3)
+    assert cm.tolist() == [[1, 1, 0], [0, 1, 0], [1, 0, 2]]

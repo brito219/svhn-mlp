@@ -1,6 +1,13 @@
-"""Gera trabalho_svhn.ipynb (rode: .venv/bin/python tools/build_notebook.py)."""
+"""Gera trabalho_svhn.ipynb (rode: .venv/bin/python tools/build_notebook.py).
+
+O código de svhn_lib.py é embutido na primeira célula (%%writefile), para o notebook ser
+autossuficiente (basta ele para rodar no Colab) e mostrar toda a implementação.
+"""
+from pathlib import Path
+
 import nbformat as nbf
 
+ROOT = Path(__file__).resolve().parent.parent
 nb = nbf.v4.new_notebook()
 C = []
 md = lambda s: C.append(nbf.v4.new_markdown_cell(s.strip()))
@@ -9,32 +16,38 @@ code = lambda s: C.append(nbf.v4.new_code_cell(s.strip()))
 md(r"""
 # Classificação de Dígitos no SVHN — Classificador Linear, MLP e CNN
 
-Notebook com a implementação e todos os experimentos do trabalho.
+**Grupo:** João Pedro, Samyr e Valber
+
+Notebook com a implementação e todos os experimentos do trabalho. Ele é autossuficiente: a primeira célula grava
+`svhn_lib.py` (modelos, laço de treino, avaliação, gráficos e predição) e as demais executam os experimentos.
 
 **Como rodar**
-- **Local:** `jupyter notebook trabalho_svhn.ipynb` com o ambiente `.venv` (roda em CPU; ~1h no total).
-- **Colab:** envie `svhn_lib.py` para a pasta do Colab (ícone de pasta à esquerda) antes de rodar, ou rode a célula de setup que pede o upload. Ative GPU em *Ambiente de execução → Alterar tipo*.
-
-Toda a lógica reaproveitável (split, modelos, laço de treino, gráficos, predição) está em `svhn_lib.py`, coberta por testes em `tests/`.
+- **Local:** `jupyter notebook trabalho_svhn.ipynb` (roda em CPU; cerca de 4 h no total).
+- **Colab:** basta abrir este notebook e executar tudo (ative a GPU em *Ambiente de execução → Alterar tipo*).
 
 **Protocolo**
-- Dados via `torchvision.datasets.SVHN`; se o servidor de Stanford falhar, `svhn_lib` lê o espelho oficial do Hugging Face (`ufldl-stanford/svhn`) em `data_hf/`, verificado byte a byte como idêntico e na mesma ordem.
-- `split="train"` (73.257 imagens) → **90% treino / 10% validação**, divisão fixa com semente 42.
-- Validação: acompanhar os experimentos e escolher o modelo (inclusive a melhor época = checkpoint).
-- `split="test"` (26.032 imagens): só para relatar o desempenho final de cada experimento — **não** é usado para nenhuma escolha.
-- Conjunto adicional do professor: usado **apenas** no final, depois de escolhido o modelo.
+- Dados: `torchvision.datasets.SVHN`, `split="train"` (73.257 imagens) e `split="test"` (26.032).
+- O `train` é dividido em **90% treino / 10% validação**, com divisão fixa pela semente 42.
+- A validação acompanha os experimentos e escolhe o modelo (e a melhor época de cada treino, por checkpoint).
+- O `test` só é usado para relatar o desempenho de cada experimento; **não** participa de nenhuma escolha.
+- Depois de escolhida a configuração, o modelo final é retreinado com todo o `train` (treino + validação), como o enunciado permite.
+- O conjunto adicional do professor é usado **apenas** na última seção, com o modelo final já definido.
+- Semente fixa (42) em tudo: rodar de novo reproduz os mesmos números na mesma máquina.
 """)
 
-code(r"""
-import os, sys, json, time
-try:
-    import svhn_lib
-except ModuleNotFoundError:  # Colab sem o arquivo
-    from google.colab import files
-    files.upload()  # selecione svhn_lib.py
-    import svhn_lib
+md(r"""
+## 0. Implementação (`svhn_lib.py`)
 
-import importlib; importlib.reload(svhn_lib)
+Todo o código reaproveitável fica nesta célula, que grava o arquivo `svhn_lib.py`. Partimos dos notebooks da aula
+(classificador linear e MLP) e adaptamos ao SVHN: entrada de 3×32×32 = 3072 valores, divisão treino/validação e
+registro de loss e acurácia por época. O arquivo também é coberto por testes automatizados (`tests/`).
+""")
+code("%%writefile svhn_lib.py\n" + (ROOT / "svhn_lib.py").read_text())
+
+code(r"""
+import os, sys, json, time, importlib
+import svhn_lib
+importlib.reload(svhn_lib)
 import svhn_lib as L
 import torch
 import numpy as np
@@ -75,13 +88,13 @@ dist.index.name = 'dígito'; dist
 md(r"""
 **Pré-processamento.** Duas versões dos dados:
 - `bruto`: pixels em [0, 1] (como no notebook da aula, só `ToTensor`).
-- `norm`: normalização por canal com média/desvio **calculados só no treino** (sem vazamento da validação/teste).
+- `norm`: subtrai a média e divide pelo desvio padrão **de cada canal de cor**, calculados só no treino
+  (slide de pré-processamento: "subtraia a média por canal"). Validação e teste usam os mesmos valores, sem vazamento.
 """)
 
 code(r"""
 mean, std = L.compute_norm_stats(X_tr_u8)
 print('média por canal:', mean.numpy().round(4), '| desvio:', std.numpy().round(4))
-torch.save({'mean': mean, 'std': std}, 'pesos/normalizacao.pt')
 
 DATA = {
     'bruto': dict(X_train=L.preprocess(X_tr_u8), y_train=y_train,
@@ -94,19 +107,33 @@ DATA = {
 """)
 
 md(r"""
+**Checagem de sanidade (da aula de loss).** Com pesos iniciais aleatórios, as 10 classes são quase equiprováveis,
+então a cross-entropy inicial deve ficar perto de $\ln 10 \approx 2{,}303$ e a acurácia perto de 10%.
+""")
+code(r"""
+L.set_seed(SEED)
+for nome, m in [('Linear', L.LinearClassifier()), ('MLP 2×500', L.MLP([500, 500])), ('CNN', L.CNN())]:
+    loss0, acc0 = L.evaluate(m, DATA['norm']['X_val'], y_val)
+    print(f'{nome:10s} loss inicial = {loss0:.3f} (ln 10 = {np.log(10):.3f}) | acurácia inicial = {acc0:.3f}')
+""")
+
+md(r"""
 ## 2. Função que roda um experimento
 
-Para cada experimento: fixa a semente, cria o modelo, treina registrando **loss e acurácia de treino e validação por época**,
-guarda os pesos da melhor época na validação, mede a acurácia no teste e salva histórico (`resultados/*.json`), curva (`resultados/*.png`) e pesos (`pesos/*.pt`).
+Para cada experimento: fixa a semente, cria o modelo, treina registrando **loss e acurácia de treino e de validação
+a cada época**, fica com os pesos da melhor época na validação, mede a acurácia no teste e salva o histórico
+(`resultados/*.json`), as curvas (`resultados/*.png`) e os pesos (`pesos/*.pt`).
 
-> A acurácia de treino é a média durante a época (com dropout/augmentation ativos); validação e teste são medidos com o modelo em modo `eval`.
+> A acurácia de treino é a média ao longo da época, com dropout e augmentation ativos. Validação e teste são medidos
+> com o modelo em modo `eval`.
 """)
 
 code(r"""
-RESULTS = []
+RESULTS, REGISTRY = [], {}
 
 def run(exp_id, nome, modificacao, make_model, dados='norm', **train_kw):
     print(f'=== E{exp_id}: {nome} ===')
+    REGISTRY[exp_id] = (make_model, dados, train_kw)
     L.set_seed(SEED)
     model = make_model()
     data = DATA[dados]
@@ -125,86 +152,141 @@ def run(exp_id, nome, modificacao, make_model, dados='norm', **train_kw):
     with open(f'resultados/E{exp_id}.json', 'w') as f:
         json.dump({'row': row, 'hist': hist}, f, indent=1)
     L.plot_history(hist, f'E{exp_id} — {nome}', f'resultados/E{exp_id}_curvas.png'); plt.show()
-    print(f"melhor época {b+1}: val_acc={row['val_acc']:.4f} | test_acc={test_acc:.4f} | {row['tempo_min']:.1f} min")
+    print(f"melhor época {b+1}: train_loss={row['train_loss']:.4f} val_loss={row['val_loss']:.4f} | "
+          f"train_acc={row['train_acc']:.4f} val_acc={row['val_acc']:.4f} | test_acc={test_acc:.4f} | {row['tempo_min']:.1f} min")
     return model, hist
 """)
 
 md(r"""
 ## 3. Experimentos
 
-Cada experimento muda **uma coisa** em relação ao anterior (exceto E7 e E8, explicados abaixo), para dar para atribuir a melhora/piora.
+Cada experimento muda **um fator** em relação ao anterior (indicado no título), para que a melhora ou a piora possa
+ser atribuída a ele. Os experimentos de taxa de aprendizado (E4 e E5) são variações do E3; os seguintes continuam
+a partir do E3, que ficou com a melhor taxa.
 """)
 
 md(r"""
 ### E1 — Classificador linear
-`logits = x·W + b` sobre os 3072 pixels normalizados, cross-entropy + regularização L2 (weight decay), SGD com momentum — mesma ideia do classificador linear da aula, agora com `nn.Linear`.
+`logits = x·W + b` sobre os 3072 pixels normalizados, com cross-entropy (softmax) e regularização L2
+(`weight_decay`), treinado por gradiente descendente em mini-batches com momentum. É o classificador linear da aula,
+agora com `nn.Linear`.
 """)
 code(r"""
-run(1, 'Classificador linear', 'Linear 3072→10, SGD+L2',
+run(1, 'Classificador linear', 'Linear 3072→10, SGD + L2',
     lambda: L.LinearClassifier(), dados='norm',
-    epochs=20, batch_size=128, lr=1e-3, optimizer='sgd', weight_decay=1e-4);
+    epochs=20, batch_size=128, lr=1e-4, optimizer='sgd', weight_decay=1e-4);
 """)
 
 md(r"""
 ### E2 — MLP baseline (código da aula)
-Exatamente a MLP do notebook da aula: 2 camadas ocultas de 500 neurônios, ReLU, Adam lr=1e-3, batch 100, entrada só em [0, 1].
+A MLP do notebook da aula, sem alterações: 2 camadas ocultas de 500 neurônios, ReLU, Adam com lr = 1e-3, batch 100
+e entrada apenas em [0, 1].
 """)
 code(r"""
-run(2, 'MLP baseline', 'MLP 2×500, entrada [0,1]',
+run(2, 'MLP baseline', 'MLP 2×500, entrada em [0,1]',
     lambda: L.MLP([500, 500]), dados='bruto',
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
-md("### E3 — + normalização por canal")
+md("### E3 — E2 + normalização por canal")
 code(r"""
-run(3, 'MLP + normalização', 'E2 + normalização média/desvio',
+run(3, 'MLP + normalização', 'E2 + normalização (média/desvio por canal)',
     lambda: L.MLP([500, 500]), dados='norm',
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
-md("### E4 — + mais camadas e neurônios (1024 → 512 → 256)")
+md(r"""
+### E4 e E5 — Taxa de aprendizado (10× maior e 10× menor que a do E3)
+Mesmo modelo do E3, mudando só a taxa de aprendizado: 1e-2 (E4) e 1e-4 (E5).
+""")
 code(r"""
-run(4, 'MLP maior', 'E3 com 3 camadas 1024-512-256',
+run(4, 'MLP lr alta (1e-2)', 'E3 com lr = 1e-2',
+    lambda: L.MLP([500, 500]), dados='norm',
+    epochs=25, batch_size=100, lr=1e-2);
+""")
+code(r"""
+run(5, 'MLP lr baixa (1e-4)', 'E3 com lr = 1e-4',
+    lambda: L.MLP([500, 500]), dados='norm',
+    epochs=25, batch_size=100, lr=1e-4);
+""")
+code(r"""
+fig, ax = plt.subplots(1, 3, figsize=(15, 3.8))
+for e, lr in [(4, '1e-2'), (3, '1e-3'), (5, '1e-4')]:
+    h = json.load(open(f'resultados/E{e}.json'))['hist']
+    ep = range(1, len(h['val_acc']) + 1)
+    ax[0].plot(ep, h['train_loss'], label=f'lr = {lr} (E{e})')
+    ax[1].plot(ep, h['val_loss'], label=f'lr = {lr} (E{e})')
+    ax[2].plot(ep, h['val_acc'], label=f'lr = {lr} (E{e})')
+ax[0].set(title='Loss de treino', xlabel='época'); ax[1].set(title='Loss de validação', xlabel='época')
+ax[2].set(title='Acurácia de validação', xlabel='época')
+for a in ax: a.grid(alpha=.3); a.legend()
+plt.suptitle('Efeito da taxa de aprendizado (MLP 2×500 normalizada)'); plt.tight_layout()
+plt.savefig('resultados/comparacao_lr.png', dpi=130); plt.show()
+""")
+
+md("### E6 — E3 + mais camadas e neurônios (1024 → 512 → 256)")
+code(r"""
+run(6, 'MLP maior', 'E3 com 3 camadas ocultas: 1024-512-256',
     lambda: L.MLP([1024, 512, 256]), dados='norm',
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
-md("### E5 — + Dropout 0.3")
+md("### E7 — E6 + Dropout 0,3")
 code(r"""
-run(5, 'MLP + dropout', 'E4 + dropout 0.3',
+run(7, 'MLP + dropout', 'E6 + dropout 0,3',
     lambda: L.MLP([1024, 512, 256], dropout=0.3), dados='norm',
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
-md("### E6 — + Batch Normalization")
+md("### E8 — E7 + Batch Normalization")
 code(r"""
-run(6, 'MLP + dropout + BN', 'E5 + BatchNorm',
+run(8, 'MLP + dropout + BN', 'E7 + BatchNorm',
     lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm',
     epochs=25, batch_size=100, lr=1e-3);
 """)
 
 md(r"""
-### E7 — Otimização: batch 256 + taxa de aprendizado com decaimento cosseno
-Batch maior dá passos menos ruidosos mas em menor número; o decaimento cosseno da lr compensa, permitindo passos grandes no começo e ajuste fino no fim.
+### E9 — E8 com batch 256 (em vez de 100)
+Batch maior: gradiente menos ruidoso, mas menos atualizações por época.
 """)
 code(r"""
-run(7, 'MLP batch 256 + cosine', 'E6 com batch 256 e lr cosseno',
+run(9, 'MLP batch 256', 'E8 com batch 256',
+    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm',
+    epochs=25, batch_size=256, lr=1e-3);
+""")
+
+md(r"""
+### E10 — E9 + taxa de aprendizado com decaimento cosseno
+A taxa começa em 1e-3 e cai suavemente até zero: passos grandes no início e ajuste fino no fim.
+""")
+code(r"""
+run(10, 'MLP + lr cosseno', 'E9 + decaimento cosseno da lr',
     lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm',
     epochs=25, batch_size=256, lr=1e-3, scheduler='cosine');
 """)
 
 md(r"""
-### E8 — CNN (rede convolucional) + data augmentation
-O enunciado deixa a arquitetura livre e cita "número de filtros". A MLP trata cada pixel como uma entrada independente;
-a convolução reaproveita os mesmos filtros em toda a imagem, o que é muito mais adequado a imagens.
-3 blocos conv (32→64→128 filtros, BN, ReLU, max-pool) + classificador com dropout 0.3.
-Augmentation: translação aleatória de até 2 px (sem flip, que altera dígitos). AdamW (weight decay 5e-4) + lr cosseno.
+### E11 — CNN (rede convolucional)
+O enunciado deixa a arquitetura livre e cita o "número de filtros". A MLP trata cada pixel como uma entrada
+independente; a convolução aplica os mesmos filtros em toda a imagem e aproveita a vizinhança dos pixels.
+Arquitetura: 3 blocos convolucionais (32 → 64 → 128 filtros 3×3, BatchNorm, ReLU, max-pool) e um classificador
+totalmente conectado com dropout 0,3. Treino: Adam, lr 1e-3 com decaimento cosseno, batch 128.
 """)
 code(r"""
-run(8, 'CNN + augmentation', 'CNN 3 blocos + translação ±2px',
+run(11, 'CNN', 'CNN 3 blocos conv (32-64-128 filtros)',
     lambda: L.CNN(dropout=0.3), dados='norm',
-    epochs=20, batch_size=128, lr=1e-3, optimizer='adamw', weight_decay=5e-4,
-    scheduler='cosine', augment_shift=2);
+    epochs=20, batch_size=128, lr=1e-3, scheduler='cosine');
+""")
+
+md(r"""
+### E12 — E11 + data augmentation
+Translação aleatória de até 2 pixels em cada imagem de treino. Não usamos espelhamento horizontal, que muda o
+significado de alguns dígitos.
+""")
+code(r"""
+run(12, 'CNN + augmentation', 'E11 + translação aleatória de ±2 px',
+    lambda: L.CNN(dropout=0.3), dados='norm',
+    epochs=20, batch_size=128, lr=1e-3, scheduler='cosine', augment_shift=2);
 """)
 
 md("## 4. Comparação dos experimentos")
@@ -217,7 +299,7 @@ df.style.format(fmt | {'tempo_min': '{:.1f}', 'params': '{:,}'})
 """)
 
 code(r"""
-fig, ax = plt.subplots(1, 2, figsize=(13, 4))
+fig, ax = plt.subplots(1, 2, figsize=(14, 4.4))
 for r in RESULTS:
     h = json.load(open(f"resultados/E{r['exp']}.json"))['hist']
     ax[0].plot(range(1, len(h['val_acc']) + 1), h['val_acc'], label=f"E{r['exp']} {r['nome']}")
@@ -225,61 +307,106 @@ for r in RESULTS:
 ax[0].set(title='Acurácia de validação por época', xlabel='época', ylabel='acurácia')
 ax[1].set(title='Loss de validação por época', xlabel='época', ylabel='loss', ylim=(0, 2.5))
 for a in ax: a.grid(alpha=.3)
-ax[0].legend(fontsize=8); plt.tight_layout(); plt.savefig('resultados/comparacao_validacao.png', dpi=130); plt.show()
+ax[0].legend(fontsize=7, ncol=2); plt.tight_layout(); plt.savefig('resultados/comparacao_validacao.png', dpi=130); plt.show()
 """)
 
 md(r"""
-## 5. Escolha do modelo final
-Critério: **maior acurácia de validação** (o teste não participa da escolha).
+## 5. Escolha do modelo
+Critério: **maior acurácia de validação**. O teste não participa da escolha.
 """)
 code(r"""
 best = max(RESULTS, key=lambda r: r['val_acc'])
 print(f"Modelo escolhido: E{best['exp']} — {best['nome']}")
-print(f"val_acc = {best['val_acc']:.4f} | test_acc = {best['test_acc']:.4f} | época {best['melhor_epoca']}")
-
-ckpt = torch.load(f"pesos/E{best['exp']}.pt")
-torch.save({'exp': best['exp'], 'nome': best['nome'], 'state_dict': ckpt['state_dict'],
-            'mean': mean, 'std': std, 'row': best}, 'melhor_modelo.pt')
+print(f"val_acc = {best['val_acc']:.4f} | test_acc = {best['test_acc']:.4f} | melhor época {best['melhor_epoca']} de {best['epocas']}")
 with open('resultados/melhor_modelo.json', 'w') as f:
     json.dump(best, f, indent=1)
-print('pesos salvos em melhor_modelo.pt')
 """)
 
 md(r"""
-## 6. Predição do conjunto adicional
-Feita **somente agora**, com o modelo já escolhido e congelado. Pré-processamento idêntico ao do treino (mesma média/desvio).
-As imagens são lidas em **ordem natural do nome do arquivo** (`2.png` antes de `10.png`), e o arquivo sai com um inteiro (0–9) por linha.
+## 6. Modelo final: retreino com todo o conjunto de treino
 
-Coloque as imagens do professor em `extra/` (descompacte o zip ali) e ajuste `NOMES` abaixo.
+O enunciado permite que a versão final use todo o `train`. Com a configuração já escolhida pela validação
+(arquitetura, hiperparâmetros e número de épocas do experimento vencedor), retreinamos o modelo com
+**treino + validação (73.257 imagens)**, com a mesma semente. Nada é ajustado nesta etapa: não há mais validação,
+e o modelo fica com os pesos da última época (a taxa de aprendizado com decaimento cosseno termina em zero, então
+o fim do treino é estável). O teste continua servindo só para relatar o resultado.
 """)
 code(r"""
-NOMES = 'NOME1_NOME2'          # <- troque pelos nomes do grupo
+make_model, dados_best, kw_best = REGISTRY[best['exp']]
+usa_norm = dados_best == 'norm'
+mean_f, std_f = L.compute_norm_stats(X_all) if usa_norm else (None, None)   # estatísticas de todo o treino
+prep = lambda X: L.preprocess(X, mean_f, std_f) if usa_norm else L.preprocess(X)
+
+L.set_seed(SEED)
+final_model = make_model()
+t0 = time.time()
+hist_final = L.train_model(final_model, dict(X_train=prep(X_all), y_train=y_all), seed=SEED, device=device, **kw_best)
+X_test_f = prep(X_test_u8)
+final_test_loss, final_test_acc = L.evaluate(final_model, X_test_f, y_test, device=device)
+print(f"\nModelo final (E{best['exp']} retreinado com treino + validação): test_acc = {final_test_acc:.4f} "
+      f"(o mesmo modelo treinado só com 90% teve {best['test_acc']:.4f}) | {(time.time() - t0) / 60:.1f} min")
+
+torch.save({'exp': best['exp'], 'nome': best['nome'], 'state_dict': final_model.state_dict(),
+            'mean': mean_f, 'std': std_f, 'dados': dados_best, 'config': kw_best,
+            'val_acc_selecao': best['val_acc'], 'test_acc': final_test_acc}, 'melhor_modelo.pt')
+with open('resultados/final.json', 'w') as f:
+    json.dump({'exp': best['exp'], 'nome': best['nome'], 'n_treino': len(X_all), 'hist': hist_final,
+               'test_loss': final_test_loss, 'test_acc': final_test_acc,
+               'test_acc_selecao': best['test_acc'], 'val_acc_selecao': best['val_acc']}, f, indent=1)
+L.plot_history(hist_final, 'Modelo final — retreino com treino + validação', 'resultados/final_curvas.png'); plt.show()
+print('pesos salvos em melhor_modelo.pt')
+""")
+
+md("### Matriz de confusão do modelo final no teste")
+code(r"""
+pred_test = L.predict(final_model, X_test_f, device=device)
+cm = L.confusion_matrix(y_test, pred_test)
+acc_classe = cm.diag().float() / cm.sum(1).float()
+
+fig, ax = plt.subplots(figsize=(6.4, 5.6))
+im = ax.imshow(cm, cmap='Blues')
+for i in range(10):
+    for j in range(10):
+        v = int(cm[i, j])
+        ax.text(j, i, v, ha='center', va='center', fontsize=7, color='white' if v > cm.max() / 2 else 'black')
+ax.set(xticks=range(10), yticks=range(10), xlabel='dígito predito', ylabel='dígito verdadeiro',
+       title=f'Matriz de confusão no teste (acurácia {final_test_acc:.2%})')
+plt.tight_layout(); plt.savefig('resultados/final_confusao.png', dpi=130); plt.show()
+
+print('acurácia por dígito:', {d: round(float(a), 4) for d, a in enumerate(acc_classe)})
+erros = cm.clone(); erros.fill_diagonal_(0)
+top = torch.topk(erros.flatten(), 5)
+print('confusões mais comuns (verdadeiro → predito):',
+      [(int(i) // 10, int(i) % 10, int(v)) for v, i in zip(top.values, top.indices)])
+with open('resultados/final_confusao.json', 'w') as f:
+    json.dump({'cm': cm.tolist(), 'acc_classe': acc_classe.tolist()}, f)
+""")
+
+md(r"""
+## 7. Predição do conjunto adicional
+Feita **somente agora**, com o modelo final já definido. O pré-processamento é o mesmo do treino do modelo final
+(mesma média e desvio). As imagens são lidas em **ordem do nome do arquivo** (ordenação numérica: `2.png` antes de
+`10.png`), e o arquivo de saída tem um inteiro de 0 a 9 por linha, na mesma ordem.
+
+As imagens do professor devem estar na pasta `extra/` (conteúdo de `images.zip`).
+""")
+code(r"""
+NOMES = 'JOAOPEDRO_SAMYR_VALBER'
 PASTA_EXTRA = 'extra'
-
-MODELOS = {1: lambda: L.LinearClassifier(), 2: lambda: L.MLP([500, 500]), 3: lambda: L.MLP([500, 500]),
-           4: lambda: L.MLP([1024, 512, 256]), 5: lambda: L.MLP([1024, 512, 256], dropout=0.3),
-           6: lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True),
-           7: lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), 8: lambda: L.CNN(dropout=0.3)}
-
-final = torch.load('melhor_modelo.pt')
-model = MODELOS[final['exp']]().to(device)
-model.load_state_dict(final['state_dict'])
-usa_norm = final['row']['dados'] == 'norm'
 
 if os.path.isdir(PASTA_EXTRA):
     nomes_arq, X_extra_u8 = L.load_image_folder(PASTA_EXTRA)
-    X_extra = L.preprocess(X_extra_u8, final['mean'], final['std']) if usa_norm else L.preprocess(X_extra_u8)
-    preds = L.predict(model, X_extra, device=device)
+    preds = L.predict(final_model, prep(X_extra_u8), device=device)
     saida = f'{NOMES}_RESULTS.txt'
     L.write_results(preds, saida)
     print(f'{len(preds)} imagens -> {saida}')
     print('primeiros arquivos:', nomes_arq[:5], '... último:', nomes_arq[-1])
     print('distribuição das predições:', np.bincount(preds.numpy(), minlength=10))
 else:
-    print(f'Pasta {PASTA_EXTRA}/ não encontrada — baixe o conjunto adicional e rode esta célula de novo.')
+    print(f'Pasta {PASTA_EXTRA}/ não encontrada: baixe o conjunto adicional e rode esta célula de novo.')
 """)
 
 nb.cells = C
 nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-nbf.write(nb, "trabalho_svhn.ipynb")
+nbf.write(nb, ROOT / "trabalho_svhn.ipynb")
 print("ok:", len(C), "células")

@@ -213,9 +213,10 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
                 seed: int = SEED, device=None, verbose: bool = True):
     """Treina `model` e registra loss/acurácia de treino e validação a cada época.
 
-    `data` precisa das chaves X_train, y_train, X_val, y_val (tensores já pré-processados).
-    Ao final o modelo fica com os pesos da época de MAIOR acurácia de validação
-    (checkpoint do melhor modelo). Retorna o histórico (dict).
+    `data` precisa das chaves X_train, y_train e, opcionalmente, X_val, y_val (tensores já
+    pré-processados). Com validação, o modelo termina com os pesos da época de MAIOR acurácia
+    de validação (checkpoint do melhor modelo). Sem validação (retreino final com treino +
+    validação), termina com os pesos da última época. Retorna o histórico (dict).
     """
     device = device or get_device()
     torch.manual_seed(seed)  # dropout e inicializações tardias
@@ -233,6 +234,7 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs) if scheduler == "cosine" else None
 
     X_tr, y_tr = data["X_train"], data["y_train"]
+    has_val = "X_val" in data
     n = len(X_tr)
     hist = {k: [] for k in ("train_loss", "train_acc", "val_loss", "val_acc", "epoch_time")}
     best_acc, best_state, best_epoch = -1.0, None, -1
@@ -260,25 +262,34 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
         if sched:
             sched.step()
 
-        val_loss, val_acc = evaluate(model, data["X_val"], data["y_val"], device=device)
         hist["train_loss"].append(run_loss / n)
         hist["train_acc"].append(run_correct / n)
-        hist["val_loss"].append(val_loss)
-        hist["val_acc"].append(val_acc)
+        msg = (f"época {epoch + 1:2d}/{epochs} | treino loss {hist['train_loss'][-1]:.4f} "
+               f"acc {hist['train_acc'][-1]:.4f}")
+        if has_val:
+            val_loss, val_acc = evaluate(model, data["X_val"], data["y_val"], device=device)
+            hist["val_loss"].append(val_loss)
+            hist["val_acc"].append(val_acc)
+            msg += f" | val loss {val_loss:.4f} acc {val_acc:.4f}"
+            if val_acc > best_acc:
+                best_acc, best_epoch = val_acc, epoch
+                best_state = copy.deepcopy(model.state_dict())
         hist["epoch_time"].append(time.time() - t0)
-
-        if val_acc > best_acc:
-            best_acc, best_epoch = val_acc, epoch
-            best_state = copy.deepcopy(model.state_dict())
         if verbose:
-            print(f"época {epoch + 1:2d}/{epochs} | treino loss {hist['train_loss'][-1]:.4f} "
-                  f"acc {hist['train_acc'][-1]:.4f} | val loss {val_loss:.4f} acc {val_acc:.4f} "
-                  f"| {hist['epoch_time'][-1]:.1f}s")
+            print(f"{msg} | {hist['epoch_time'][-1]:.1f}s")
 
-    model.load_state_dict(best_state)
-    hist["best_epoch"] = best_epoch
-    hist["best_val_acc"] = best_acc
+    if has_val:
+        model.load_state_dict(best_state)
+        hist["best_epoch"], hist["best_val_acc"] = best_epoch, best_acc
+    else:
+        hist["best_epoch"], hist["best_val_acc"] = epochs - 1, None
     return hist
+
+
+def confusion_matrix(y_true, y_pred, n_classes: int = N_CLASSES) -> torch.Tensor:
+    """cm[i, j] = nº de exemplos da classe i preditos como j."""
+    idx = y_true.long() * n_classes + y_pred.long()
+    return torch.bincount(idx, minlength=n_classes * n_classes).view(n_classes, n_classes)
 
 
 @torch.no_grad()
@@ -300,11 +311,12 @@ def plot_history(hist, title: str = "", path=None):
     ep = range(1, len(hist["train_loss"]) + 1)
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 3.8))
     a1.plot(ep, hist["train_loss"], label="treino")
-    a1.plot(ep, hist["val_loss"], label="validação")
     a1.set(xlabel="época", ylabel="loss (cross-entropy)", title="Loss")
     a2.plot(ep, hist["train_acc"], label="treino")
-    a2.plot(ep, hist["val_acc"], label="validação")
-    a2.axvline(hist["best_epoch"] + 1, ls=":", c="gray", label="melhor época (val)")
+    if hist["val_loss"]:
+        a1.plot(ep, hist["val_loss"], label="validação")
+        a2.plot(ep, hist["val_acc"], label="validação")
+        a2.axvline(hist["best_epoch"] + 1, ls=":", c="gray", label="melhor época (val)")
     a2.set(xlabel="época", ylabel="acurácia", title="Acurácia")
     from matplotlib.ticker import MaxNLocator
     for a in (a1, a2):

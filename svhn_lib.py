@@ -306,7 +306,9 @@ def plot_history(hist, title: str = "", path=None):
     a2.plot(ep, hist["val_acc"], label="validação")
     a2.axvline(hist["best_epoch"] + 1, ls=":", c="gray", label="melhor época (val)")
     a2.set(xlabel="época", ylabel="acurácia", title="Acurácia")
+    from matplotlib.ticker import MaxNLocator
     for a in (a1, a2):
+        a.xaxis.set_major_locator(MaxNLocator(integer=True))
         a.grid(alpha=0.3)
         a.legend()
     fig.suptitle(title)

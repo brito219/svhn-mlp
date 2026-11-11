@@ -42,15 +42,37 @@ def get_device() -> torch.device:
 # Dados
 # ---------------------------------------------------------------------------
 
-def load_svhn(root: str = "data"):
+def load_parquet_split(path):
+    """Lê um split do espelho oficial do SVHN no Hugging Face (ufldl-stanford/svhn, cropped_digits).
+
+    Mesmas imagens, mesma ordem e mesmos rótulos (0-9) de torchvision.datasets.SVHN.
+    """
+    import io
+
+    import pandas as pd
+    from PIL import Image
+
+    df = pd.read_parquet(path)
+    X = np.stack([np.asarray(Image.open(io.BytesIO(im["bytes"])).convert("RGB"), dtype=np.uint8)
+                  for im in df["image"]]).transpose(0, 3, 1, 2)
+    return torch.from_numpy(np.ascontiguousarray(X)), torch.tensor(df["label"].to_numpy(), dtype=torch.int64)
+
+
+def load_svhn(root: str = "data", hf_root: str = "data_hf"):
     """Carrega os splits 'train' e 'test' do SVHN como tensores uint8 (N, 3, 32, 32).
 
-    O torchvision já converte o rótulo 10 (dígito zero no .mat original) para 0.
+    Usa torchvision.datasets.SVHN (que converte o rótulo 10 do .mat para 0). Se os .mat não
+    estiverem em `root` mas houver o espelho parquet em `hf_root` (servidor de Stanford instável),
+    lê dele — o conteúdo e a ordem são os mesmos.
     """
     import torchvision
 
     out = []
     for split in ("train", "test"):
+        pq = Path(hf_root) / f"{split}.parquet"
+        if not (Path(root) / f"{split}_32x32.mat").exists() and pq.exists():
+            out.append(load_parquet_split(pq))
+            continue
         ds = torchvision.datasets.SVHN(root=root, split=split, download=True)
         X = torch.from_numpy(ds.data)  # já vem em (N, 3, 32, 32), uint8
         y = torch.from_numpy(ds.labels.astype(np.int64))

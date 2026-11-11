@@ -25,6 +25,23 @@ def test_split_muda_com_outra_semente():
     assert not torch.equal(va1, va2)
 
 
+# ---------- leitura do espelho parquet (Hugging Face) ----------
+
+def test_le_split_do_parquet(tmp_path):
+    import io
+    import pandas as pd
+    rows = []
+    for lbl in [3, 0, 9]:
+        buf = io.BytesIO()
+        Image.fromarray(np.full((32, 32, 3), lbl * 10, dtype=np.uint8)).save(buf, format="PNG")
+        rows.append({"image": {"bytes": buf.getvalue(), "path": None}, "label": lbl})
+    pd.DataFrame(rows).to_parquet(tmp_path / "train.parquet")
+    X, y = L.load_parquet_split(tmp_path / "train.parquet")
+    assert X.shape == (3, 3, 32, 32) and X.dtype == torch.uint8
+    assert y.tolist() == [3, 0, 9] and y.dtype == torch.int64
+    assert X[:, 0, 0, 0].tolist() == [30, 0, 90]
+
+
 # ---------- pré-processamento ----------
 
 def test_normalizacao_por_canal():

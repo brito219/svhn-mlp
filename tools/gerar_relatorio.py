@@ -65,7 +65,8 @@ def table(data, col_widths, highlight_row=None, center_from=2, font=8.2):
     if highlight_row is not None:
         style.append(("BACKGROUND", (0, highlight_row), (-1, highlight_row), colors.HexColor(VERDE)))
     t.setStyle(TableStyle(style))
-    return KeepTogether([t, Spacer(1, 6)])
+    t.spaceAfter = 7
+    return t
 
 
 pct = lambda v: f"{100 * v:.2f}%".replace(".", ",")
@@ -114,7 +115,7 @@ tab = [["Exp.", "Modificação", "Loss\ntreino", "Loss\nval.", "Acc.\ntreino", "
 for r in rows:
     pai = r.get("pai")
     d = "—" if pai is None else f"{100 * (r['val_acc'] - rows[pai - 1]['val_acc']):+.2f} pp".replace(".", ",")
-    tab.append([f"E{r['exp']}", para(r["modificacao"], SMALL), num(r["train_loss"]), num(r["val_loss"]),
+    tab.append([f"E{r['exp']}", para(r["modificacao"].replace("0.0001", "1e-4").replace("0.001", "1e-3"), SMALL), num(r["train_loss"]), num(r["val_loss"]),
                 pct(r["train_acc"]), pct(r["val_acc"]), pct(r["test_acc"]), d, para(T.VEREDITO[r["exp"]], SMALL)])
 story.append(table(tab, [1.0 * cm, 3.7 * cm, 1.2 * cm, 1.2 * cm, 1.5 * cm, 1.5 * cm, 1.5 * cm, 1.7 * cm, 3.7 * cm],
                    highlight_row=best["exp"]))
@@ -140,14 +141,14 @@ mb = [["Item", "Valor"],
       ["Modelo", f"E{best['exp']} — {best['nome']}"],
       ["Arquitetura", para(T.MELHOR_ARQ, SMALL)],
       ["Hiperparâmetros", para(T.MELHOR_HP, SMALL)],
-      ["Acurácia de validação (seleção)", f"{pct(best['val_acc'])} (época {best['melhor_epoca']} de {best['epocas']})"],
-      ["Acurácia de teste (treinado com 90% do treino)", pct(best["test_acc"])],
-      ["Acurácia de teste (modelo final, retreinado com 100%)", pct(final["test_acc"])],
+      ["Acurácia de validação (E13, seleção)", f"{pct(best['val_acc'])} (época {best['melhor_epoca']} de {best['epocas']})"],
+      ["Acurácia de teste (E13, treinado com 90%)", pct(best["test_acc"])],
+      [para("<b>Acurácia de teste do modelo final</b> (retreinado com 100% do treino)", SMALL), para(f"<b>{pct(final['test_acc'])}</b>", SMALL)],
       ["Pesos do modelo final", "melhor_modelo.pt"]]
-story.append(table(mb, [7.2 * cm, 9.8 * cm], center_from=9, font=8.8))
+story.append(table(mb, [6.2 * cm, 10.8 * cm], center_from=9))
 n_fig += 1
 story.append(fig("final_confusao.png", f"Figura {n_fig} — Matriz de confusão do modelo final no conjunto de teste.",
-                 width=W * 0.52))
+                 width=W * 0.47))
 story += [para(t) for t in T.MELHOR_ERROS]
 
 # ---------------- 5. conclusão ----------------
@@ -155,7 +156,7 @@ story.append(para("5. Conclusão", H1))
 story += [para(t) for t in T.CONCLUSAO]
 story.append(para("Principais dificuldades", H2))
 story += bullets(T.DIFICULDADES)
-story.append(para("Reprodutibilidade e entregáveis", H2))
+story.append(para("Entregáveis", H2))
 story += bullets(T.ENTREGAVEIS)
 
 

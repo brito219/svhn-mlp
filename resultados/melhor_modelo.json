@@ -1,0 +1,23 @@
+{
+ "exp": 13,
+ "nome": "CNN + augmentation",
+ "modificacao": "E12 + transla\u00e7\u00e3o aleat\u00f3ria de \u00b12 px",
+ "dados": "norm",
+ "pai": 12,
+ "params": 814570,
+ "epocas": 20,
+ "melhor_epoca": 19,
+ "train_loss": 0.12463048398580605,
+ "val_loss": 0.16162708812550122,
+ "train_acc": 0.9679058409549377,
+ "val_acc": 0.9579579579579579,
+ "test_acc": 0.962661339889367,
+ "tempo_min": 55.76317672729492,
+ "config": {
+  "epochs": 20,
+  "batch_size": 128,
+  "lr": 0.001,
+  "scheduler": "cosine",
+  "augment_shift": 2
+ }
+}

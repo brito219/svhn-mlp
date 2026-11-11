@@ -191,3 +191,22 @@ def test_matriz_de_confusao():
     p = torch.tensor([0, 1, 1, 2, 2, 0])
     cm = L.confusion_matrix(y, p, n_classes=3)
     assert cm.tolist() == [[1, 1, 0], [0, 1, 0], [1, 0, 2]]
+
+
+# ---------- estatísticas de normalização exatas (reprodutibilidade) ----------
+
+def test_norm_stats_sao_exatas_e_independem_do_layout_de_memoria():
+    g = torch.Generator().manual_seed(1)
+    X = torch.randint(0, 256, (4000, 3, 32, 32), dtype=torch.uint8, generator=g)
+    mean, std = L.compute_norm_stats(X)
+    # referência em float64 (NumPy)
+    Xd = X.numpy().astype(np.float64) / 255.0
+    ref_mean = torch.tensor(Xd.mean(axis=(0, 2, 3)), dtype=torch.float32)
+    ref_std = torch.tensor(Xd.std(axis=(0, 2, 3), ddof=1), dtype=torch.float32)
+    assert torch.equal(mean, ref_mean) and torch.equal(std, ref_std)
+    # mesmo conteúdo, tensor não contíguo (como o que vem do torchvision): resultado idêntico bit a bit
+    X_nc = X.permute(0, 2, 3, 1).contiguous().permute(0, 3, 1, 2)
+    assert not X_nc.is_contiguous()
+    mean2, std2 = L.compute_norm_stats(X_nc)
+    assert torch.equal(mean, mean2) and torch.equal(std, std2)
+    assert mean.dtype == torch.float32 and std.dtype == torch.float32

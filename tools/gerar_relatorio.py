@@ -1,37 +1,40 @@
 """Gera relatorio.pdf a partir de resultados/*.json e do texto em tools/relatorio_texto.py.
 
 Uso: .venv/bin/python tools/gerar_relatorio.py
+Todos os números das tabelas vêm dos JSONs gerados pelo notebook; o texto fica em relatorio_texto.py.
 """
 import json
 import sys
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
-                                Spacer, Table, TableStyle)
+from reportlab.platypus import (Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                TableStyle)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import relatorio_texto as T  # noqa: E402
 
 RES = ROOT / "resultados"
-rows = [json.load(open(RES / f"E{i}.json"))["row"] for i in range(1, 9)]
+N_EXP = len(list(RES.glob("E*.json")))
+rows = [json.load(open(RES / f"E{i}.json"))["row"] for i in range(1, N_EXP + 1)]
 best = json.load(open(RES / "melhor_modelo.json"))
+final = json.load(open(RES / "final.json"))
 
 ss = getSampleStyleSheet()
-H1 = ParagraphStyle("h1", parent=ss["Heading1"], fontSize=15, spaceAfter=6, keepWithNext=1)
-H2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=12.5, spaceBefore=10, spaceAfter=4, keepWithNext=1)
-P = ParagraphStyle("p", parent=ss["BodyText"], fontSize=10, leading=13.5, alignment=TA_JUSTIFY)
-from reportlab.lib.enums import TA_LEFT
-SMALL = ParagraphStyle("s", parent=P, fontSize=8.5, leading=11, alignment=TA_LEFT)
+H1 = ParagraphStyle("h1", parent=ss["Heading1"], fontSize=14.5, spaceBefore=8, spaceAfter=5, keepWithNext=1)
+H2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=12, spaceBefore=8, spaceAfter=4, keepWithNext=1)
+P = ParagraphStyle("p", parent=ss["BodyText"], fontSize=10, leading=13.2, alignment=TA_JUSTIFY)
+SMALL = ParagraphStyle("s", parent=P, fontSize=8.2, leading=10.4, alignment=TA_LEFT)
 CAP = ParagraphStyle("cap", parent=P, fontSize=8.5, alignment=TA_CENTER, textColor=colors.HexColor("#444444"))
-TITLE = ParagraphStyle("t", parent=ss["Title"], fontSize=18)
+TITLE = ParagraphStyle("t", parent=ss["Title"], fontSize=18, spaceAfter=4)
 
 W = A4[0] - 4 * cm
+VERDE = "#e6f4e6"
 
 
 def para(txt, st=P):
@@ -42,98 +45,112 @@ def bullets(items):
     return [para(f"• {it}") for it in items]
 
 
-def fig(path, caption, width=W):
+def fig(name, caption, width=W):
     from PIL import Image as PI
+    path = RES / name
     w, h = PI.open(path).size
-    return KeepTogether([Image(str(path), width=width, height=width * h / w), para(caption, CAP), Spacer(1, 6)])
+    return KeepTogether([Image(str(path), width=width, height=width * h / w), para(caption, CAP), Spacer(1, 5)])
 
 
-def table(data, col_widths, header_bg="#dbe7f3", highlight_row=None):
+def table(data, col_widths, highlight_row=None, center_from=2, font=8.2):
     t = Table(data, colWidths=col_widths, repeatRows=1)
     style = [("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
-             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(header_bg)),
+             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dbe7f3")),
              ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-             ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+             ("FONTSIZE", (0, 0), (-1, -1), font),
              ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-             ("ALIGN", (2, 1), (-1, -1), "CENTER")]
+             ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+             ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+             ("ALIGN", (center_from, 1), (-1, -1), "CENTER")]
     if highlight_row is not None:
-        style.append(("BACKGROUND", (0, highlight_row), (-1, highlight_row), colors.HexColor("#e6f4e6")))
+        style.append(("BACKGROUND", (0, highlight_row), (-1, highlight_row), colors.HexColor(VERDE)))
     t.setStyle(TableStyle(style))
-    return KeepTogether([t, Spacer(1, 8)])
+    return KeepTogether([t, Spacer(1, 6)])
 
 
-pct = lambda v: f"{100 * v:.2f}%"
+pct = lambda v: f"{100 * v:.2f}%".replace(".", ",")
+num = lambda v, n=3: f"{v:.{n}f}".replace(".", ",")
+milhar = lambda v: f"{v:,}".replace(",", ".")
 story = []
 
-# ---------------- capa / cabeçalho ----------------
+# ---------------- cabeçalho ----------------
 story += [para("Classificação de Dígitos no Dataset SVHN", TITLE),
-          para(T.AUTORES, CAP), para(T.DISCIPLINA, CAP), Spacer(1, 10)]
+          para(T.AUTORES, CAP), para(T.DISCIPLINA, CAP), Spacer(1, 8)]
 
-# ---------------- 9.1 solução ----------------
+# ---------------- 1. solução ----------------
 story.append(para("1. Solução desenvolvida", H1))
 story += [para(t) for t in T.SOLUCAO]
 story.append(para("Protocolo de avaliação", H2))
 story += bullets(T.PROTOCOLO)
 
-mod = [["Modelo", "Arquitetura", "Parâmetros"]]
-for e, arq in T.ARQUITETURAS:
-    r = rows[e - 1]
-    mod.append([para(f"E{e} — {r['nome']}", SMALL), para(arq, SMALL), f"{r['params']:,}".replace(",", ".")])
-story += [para("Modelos utilizados", H2), table(mod, [4.2 * cm, 9.8 * cm, 3 * cm])]
+story.append(para("Modelos utilizados", H2))
+mod = [["Modelo", "Experimentos", "Arquitetura", "Parâmetros"]]
+for nome, exps, e_ref, arq in T.ARQUITETURAS:
+    mod.append([para(nome, SMALL), exps, para(arq, SMALL), milhar(rows[e_ref - 1]["params"])])
+story.append(table(mod, [3.0 * cm, 2.3 * cm, 9.5 * cm, 2.2 * cm], center_from=3))
 
-hp = [["Exp.", "Otimizador", "lr", "Batch", "Épocas", "Weight decay", "Outros"]]
+story.append(para("Hiperparâmetros mais importantes", H2))
+hp = [["Exp.", "Otimizador", "lr", "Batch", "Épocas", "Outros"]]
+OPT = {"adam": "Adam", "adamw": "AdamW", "sgd": "SGD + momentum"}
 for r in rows:
     c = r["config"]
-    outros = []
+    outros = ["entrada em [0,1]" if r["dados"] == "bruto" else "entrada normalizada"]
+    if c.get("weight_decay"):
+        outros.append(f"L2 (weight decay) {c['weight_decay']:g}")
     if c.get("scheduler"):
-        outros.append("lr cosseno")
+        outros.append("lr com decaimento cosseno")
     if c.get("augment_shift"):
-        outros.append(f"translação ±{c['augment_shift']}px")
-    outros.append("entrada [0,1]" if r["dados"] == "bruto" else "normalizada")
-    hp.append([f"E{r['exp']}", c.get("optimizer", "adam").upper().replace("ADAMW", "AdamW").replace("ADAM", "Adam"),
-               f"{c['lr']:g}", c["batch_size"], c["epochs"], f"{c.get('weight_decay', 0):g}", ", ".join(outros)])
-story += [para("Hiperparâmetros mais importantes", H2), table(hp, [1.3 * cm, 2.3 * cm, 1.5 * cm, 1.4 * cm, 1.6 * cm, 2.4 * cm, 6.5 * cm])]
+        outros.append(f"translação ±{c['augment_shift']} px")
+    hp.append([f"E{r['exp']}", OPT[c.get("optimizer", "adam")], f"{c['lr']:g}", c["batch_size"], c["epochs"],
+               para(", ".join(outros), SMALL)])
+story.append(table(hp, [1.2 * cm, 3.0 * cm, 1.6 * cm, 1.4 * cm, 1.5 * cm, 8.3 * cm], center_from=1))
+story += [para(t) for t in T.HIPER_NOTA]
 
-# ---------------- 9.2 experimentos ----------------
+# ---------------- 2. experimentos ----------------
 story.append(para("2. Experimentos", H1))
 story.append(para(T.EXPERIMENTOS_INTRO))
-tab = [["Exp.", "Modificação", "Acc. treino", "Acc. val.", "Acc. teste", "Δ val.", "Resultado"]]
-prev = None
+tab = [["Exp.", "Modificação", "Loss\ntreino", "Loss\nval.", "Acc.\ntreino", "Acc.\nval.", "Acc.\nteste",
+        "Δ val.", "Resultado"]]
 for r in rows:
-    d = "—" if prev is None else f"{100 * (r['val_acc'] - prev):+.2f} pp"
-    tab.append([f"E{r['exp']}", para(r["modificacao"], SMALL), pct(r["train_acc"]), pct(r["val_acc"]),
-                pct(r["test_acc"]), d, para(T.VEREDITO[r["exp"]], SMALL)])
-    prev = r["val_acc"]
-story.append(table(tab, [1.1 * cm, 4.6 * cm, 1.9 * cm, 2.1 * cm, 1.8 * cm, 1.7 * cm, 3.8 * cm],
+    pai = T.PAI.get(r["exp"])
+    d = "—" if pai is None else f"{100 * (r['val_acc'] - rows[pai - 1]['val_acc']):+.2f} pp".replace(".", ",")
+    tab.append([f"E{r['exp']}", para(r["modificacao"], SMALL), num(r["train_loss"]), num(r["val_loss"]),
+                pct(r["train_acc"]), pct(r["val_acc"]), pct(r["test_acc"]), d, para(T.VEREDITO[r["exp"]], SMALL)])
+story.append(table(tab, [1.0 * cm, 3.7 * cm, 1.2 * cm, 1.2 * cm, 1.5 * cm, 1.5 * cm, 1.5 * cm, 1.7 * cm, 3.7 * cm],
                    highlight_row=best["exp"]))
-story.append(para("Acurácias na época de melhor validação (checkpoint). Δ val. = variação da acurácia de validação "
-                  "em relação ao experimento anterior; linha verde = modelo final.", CAP))
-story.append(Spacer(1, 6))
+story.append(para(T.TABELA_LEGENDA, CAP))
+story.append(Spacer(1, 4))
 story += [para(t) for t in T.ANALISE_EXPERIMENTOS]
 
-# ---------------- 9.3 curvas ----------------
-story.append(PageBreak())
+# ---------------- 3. curvas ----------------
 story.append(para("3. Curvas de treinamento", H1))
 story.append(para(T.CURVAS_INTRO))
-story.append(fig(RES / "comparacao_validacao.png", "Figura 1 — Acurácia e loss de validação por época, todos os experimentos."))
-for e, txt in T.CURVAS:
-    story.append(fig(RES / f"E{e}_curvas.png", f"Figura — E{e}: {rows[e - 1]['nome']} (treino x validação).", width=W * 0.92))
-    story.append(para(txt))
-    story.append(Spacer(1, 4))
+n_fig = 0
+for arquivo, legenda, txt, largura in T.CURVAS:
+    n_fig += 1
+    story.append(fig(arquivo, f"Figura {n_fig} — {legenda}", width=W * largura))
+    if txt:
+        story.append(para(txt))
+        story.append(Spacer(1, 4))
 
-# ---------------- 9.4 melhor solução ----------------
-story.append(KeepTogether([para("4. Melhor solução", H1)] + [para(t) for t in T.MELHOR]))
+# ---------------- 4. melhor solução ----------------
+story.append(para("4. Melhor solução", H1))
+story += [para(t) for t in T.MELHOR]
 mb = [["Item", "Valor"],
       ["Modelo", f"E{best['exp']} — {best['nome']}"],
-      ["Arquitetura", para(dict(T.ARQUITETURAS)[best["exp"]], SMALL)],
+      ["Arquitetura", para(T.MELHOR_ARQ, SMALL)],
       ["Hiperparâmetros", para(T.MELHOR_HP, SMALL)],
-      ["Melhor época (validação)", f"{best['melhor_epoca']} de {best['epocas']}"],
-      ["Acurácia de validação", pct(best["val_acc"])],
-      ["Acurácia de teste", pct(best["test_acc"])],
-      ["Pesos", "melhor_modelo.pt"]]
-story.append(table(mb, [5 * cm, 12 * cm]))
+      ["Acurácia de validação (seleção)", f"{pct(best['val_acc'])} (época {best['melhor_epoca']} de {best['epocas']})"],
+      ["Acurácia de teste (treinado com 90% do treino)", pct(best["test_acc"])],
+      ["Acurácia de teste (modelo final, retreinado com 100%)", pct(final["test_acc"])],
+      ["Pesos do modelo final", "melhor_modelo.pt"]]
+story.append(table(mb, [7.2 * cm, 9.8 * cm], center_from=9, font=8.8))
+n_fig += 1
+story.append(fig("final_confusao.png", f"Figura {n_fig} — Matriz de confusão do modelo final no conjunto de teste.",
+                 width=W * 0.52))
+story += [para(t) for t in T.MELHOR_ERROS]
 
-# ---------------- 9.5 conclusão ----------------
+# ---------------- 5. conclusão ----------------
 story.append(para("5. Conclusão", H1))
 story += [para(t) for t in T.CONCLUSAO]
 story.append(para("Principais dificuldades", H2))
@@ -150,6 +167,6 @@ def rodape(canvas, doc):
 
 
 SimpleDocTemplate(str(ROOT / "relatorio.pdf"), pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
-                  topMargin=1.8 * cm, bottomMargin=1.8 * cm, title="Relatório — SVHN").build(
-    story, onFirstPage=rodape, onLaterPages=rodape)
+                  topMargin=1.7 * cm, bottomMargin=1.8 * cm, title="Relatório — Classificação de Dígitos no SVHN",
+                  author=T.AUTORES).build(story, onFirstPage=rodape, onLaterPages=rodape)
 print("relatorio.pdf gerado")

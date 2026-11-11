@@ -89,9 +89,20 @@ def split_train_val(n: int, val_frac: float = 0.1, seed: int = SEED):
 
 
 def compute_norm_stats(X: torch.Tensor):
-    """Média e desvio padrão por canal (em escala [0, 1]), calculados só no treino."""
-    Xf = X.float() / 255.0
-    return Xf.mean(dim=(0, 2, 3)), Xf.std(dim=(0, 2, 3))
+    """Média e desvio padrão por canal (em escala [0, 1]), calculados só no treino.
+
+    Usa somas inteiras exatas dos pixels uint8. Somar dezenas de milhões de valores em float32
+    dá resultados que mudam na 7ª casa conforme a ordem da soma (número de threads, alinhamento
+    de memória), e essa diferença se amplifica no treino; com inteiros, o resultado é sempre o
+    mesmo, o que garante a reprodutibilidade.
+    """
+    means, stds = [], []
+    for c in range(X.shape[1]):
+        xc = X[:, c].to(torch.int64)
+        n, s, ss = xc.numel(), int(xc.sum()), int((xc * xc).sum())  # inteiros exatos
+        means.append(s / n / 255.0)
+        stds.append(((ss * n - s * s) / (n * (n - 1))) ** 0.5 / 255.0)  # desvio amostral (n - 1)
+    return torch.tensor(means, dtype=torch.float32), torch.tensor(stds, dtype=torch.float32)
 
 
 def preprocess(X: torch.Tensor, mean=None, std=None) -> torch.Tensor:

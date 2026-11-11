@@ -18,7 +18,8 @@ Notebook com a implementação e todos os experimentos do trabalho.
 Toda a lógica reaproveitável (split, modelos, laço de treino, gráficos, predição) está em `svhn_lib.py`, coberta por testes em `tests/`.
 
 **Protocolo**
-- Dados via `torchvision.datasets.SVHN`; se o servidor de Stanford falhar, `svhn_lib` lê o espelho oficial do Hugging Face (`ufldl-stanford/svhn`) em `data_hf/`, verificado byte a byte como idêntico e na mesma ordem.\n- `split="train"` (73.257 imagens) → **90% treino / 10% validação**, divisão fixa com semente 42.
+- Dados via `torchvision.datasets.SVHN`; se o servidor de Stanford falhar, `svhn_lib` lê o espelho oficial do Hugging Face (`ufldl-stanford/svhn`) em `data_hf/`, verificado byte a byte como idêntico e na mesma ordem.
+- `split="train"` (73.257 imagens) → **90% treino / 10% validação**, divisão fixa com semente 42.
 - Validação: acompanhar os experimentos e escolher o modelo (inclusive a melhor época = checkpoint).
 - `split="test"` (26.032 imagens): só para relatar o desempenho final de cada experimento — **não** é usado para nenhuma escolha.
 - Conjunto adicional do professor: usado **apenas** no final, depois de escolhido o modelo.

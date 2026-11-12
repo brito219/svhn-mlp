@@ -2,7 +2,6 @@
 
 1. Re-treina E5 e E11 do zero e compara o histórico com resultados/*.json (reprodutibilidade bit a bit).
 2. Recarrega melhor_modelo.pt, confere a acurácia de teste e refaz as predições do conjunto adicional.
-3. Gera o arquivo reserva com a melhor MLP (reserva_mlp/), caso o modelo final precise ser uma MLP.
 """
 import json
 import sys
@@ -46,34 +45,30 @@ for e, mk in MODELOS.items():
           f"| val {h['best_val_acc']:.4f} (salvo {ref['row']['val_acc']:.4f}) | teste {ta:.4f} (salvo {ref['row']['test_acc']:.4f})")
     check(f"E{e}: acurácia de teste idêntica", ta == ref["row"]["test_acc"])
 
-# 2. modelo final
+# 2. modelo final (MLP)
 ck = torch.load(ROOT / "melhor_modelo.pt")
 fin = json.load(open(ROOT / "resultados/final.json"))
-final = L.CNN(dropout=0.3)
+final = L.MLP(**ck["arquitetura"])
 final.load_state_dict(ck["state_dict"])
-_, ta = L.evaluate(final, L.preprocess(X_te, ck["mean"], ck["std"]), y_te)
+R = ck["tta_raio"]
+
+
+def prep(X):
+    Xf = L.preprocess(X, ck["mean"], ck["std"])
+    return L.per_image_norm(Xf) if ck["dados"] == "norm_img" else Xf
+
+
+ta = (L.predict_tta(final, prep(X_te), R) == y_te).float().mean().item()
 check("melhor_modelo.pt recarregado: acurácia de teste igual à do relatório", ta == fin["test_acc"], f"| {ta:.4f}")
 mf, sf = L.compute_norm_stats(X_all)
 check("normalização salva = estatísticas de todo o treino", torch.equal(mf, ck["mean"]) and torch.equal(sf, ck["std"]))
+check("modelo final é uma rede totalmente conectada (só Linear/BatchNorm1d/ReLU/Dropout)",
+      all(type(m).__name__ in ("Linear", "BatchNorm1d", "ReLU", "Dropout") for m in final.net))
 
 nomes, X_extra = L.load_image_folder(ROOT / "extra")
-preds = L.predict(final, L.preprocess(X_extra, ck["mean"], ck["std"]))
+preds = L.predict_tta(final, prep(X_extra), R)
 arq = [int(l) for l in open(ROOT / f"{NOMES}_RESULTS.txt")]
 check("arquivo de predições: nº de linhas = nº de imagens", len(arq) == len(nomes), f"| {len(arq)}")
 check("arquivo de predições idêntico ao refeito com melhor_modelo.pt", preds.tolist() == arq)
 check("imagens em ordem crescente do nome", nomes == sorted(nomes) and nomes[0] == "000000.png")
-
-# 3. reserva: melhor MLP (E11)
-ck11 = torch.load(ROOT / "pesos/E11.pt")
-mlp = MODELOS[11]()
-mlp.load_state_dict(ck11["state_dict"])
-_, ta = L.evaluate(mlp, Xt, y_te)
-check("pesos da melhor MLP (E11) conferem com o teste salvo", ta == ck11["row"]["test_acc"], f"| {ta:.4f}")
-p_mlp = L.predict(mlp, L.preprocess(X_extra, mean, std))
-(ROOT / "reserva_mlp").mkdir(exist_ok=True)
-L.write_results(p_mlp, ROOT / "reserva_mlp" / f"{NOMES}_RESULTS.txt")
-torch.save({"exp": 11, "state_dict": ck11["state_dict"], "mean": mean, "std": std, "row": ck11["row"]},
-           ROOT / "reserva_mlp" / "melhor_mlp.pt")
-print(f"reserva_mlp/ gerada | concordância MLP x modelo final no conjunto adicional: "
-      f"{(p_mlp == preds).float().mean().item():.4f}")
 print("RESULTADO:", "TUDO OK" if ok else "HÁ FALHAS")

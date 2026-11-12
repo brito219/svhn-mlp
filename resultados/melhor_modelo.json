@@ -1,23 +1,82 @@
 {
- "exp": 13,
- "nome": "CNN + augmentation",
- "modificacao": "E12 + transla\u00e7\u00e3o aleat\u00f3ria de \u00b12 px",
- "dados": "norm",
- "pai": 12,
- "params": 814570,
- "epocas": 20,
- "melhor_epoca": 19,
- "train_loss": 0.12463048398580605,
- "val_loss": 0.16162708812550122,
- "train_acc": 0.9679058409549377,
- "val_acc": 0.9579579579579579,
- "test_acc": 0.962661339889367,
- "tempo_min": 55.76317672729492,
+ "exp": 17,
+ "nome": "MLP grande + rota\u00e7\u00e3o/escala",
+ "modificacao": "E16 + rota\u00e7\u00e3o \u00b110\u00b0 e escala \u00b110% no augmentation",
+ "dados": "norm_img",
+ "pai": 16,
+ "params": 18919434,
+ "epocas": 60,
+ "melhor_epoca": 57,
+ "train_loss": 0.10123121656346477,
+ "val_loss": 0.26124232836574146,
+ "train_acc": 0.967192974473313,
+ "val_acc": 0.9354354354354354,
+ "test_acc": 0.923939766441303,
+ "tempo_min": 94.88270697593688,
  "config": {
-  "epochs": 20,
+  "epochs": 60,
   "batch_size": 128,
   "lr": 0.001,
-  "scheduler": "cosine",
-  "augment_shift": 2
+  "optimizer": "adamw",
+  "scheduler": "onecycle",
+  "augment_shift": 2,
+  "augment_rot": 10.0,
+  "augment_scale": 0.1
+ },
+ "tta": [
+  {
+   "raio": 0,
+   "n_translacoes": 1,
+   "val_acc": 0.93543541431427,
+   "test_acc": 0.9239397644996643
+  },
+  {
+   "raio": 1,
+   "n_translacoes": 9,
+   "val_acc": 0.939803421497345,
+   "test_acc": 0.9300092458724976
+  },
+  {
+   "raio": 2,
+   "n_translacoes": 25,
+   "val_acc": 0.9432159662246704,
+   "test_acc": 0.9347726106643677
+  }
+ ],
+ "tta_raio": 2,
+ "val_acc_tta": 0.9432159662246704,
+ "test_acc_tta": 0.9347726106643677,
+ "arquitetura": {
+  "hidden_sizes": [
+   2048,
+   2048,
+   2048,
+   2048
+  ],
+  "dropout": 0.1,
+  "batchnorm": true
+ },
+ "cnn": {
+  "exp": 13,
+  "nome": "CNN + augmentation",
+  "modificacao": "E12 + transla\u00e7\u00e3o aleat\u00f3ria de \u00b12 px",
+  "dados": "norm",
+  "pai": 12,
+  "params": 814570,
+  "epocas": 20,
+  "melhor_epoca": 19,
+  "train_loss": 0.12463048398580605,
+  "val_loss": 0.16162708812550122,
+  "train_acc": 0.9679058409549377,
+  "val_acc": 0.9579579579579579,
+  "test_acc": 0.962661339889367,
+  "tempo_min": 54.275263432661696,
+  "config": {
+   "epochs": 20,
+   "batch_size": 128,
+   "lr": 0.001,
+   "scheduler": "cosine",
+   "augment_shift": 2
+  }
  }
 }

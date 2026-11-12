@@ -95,13 +95,16 @@ hp = [["Exp.", "Otimizador", "lr", "Batch", "Épocas", "Outros"]]
 OPT = {"adam": "Adam", "adamw": "AdamW", "sgd": "SGD + momentum"}
 for r in rows:
     c = r["config"]
-    outros = ["entrada em [0,1]" if r["dados"] == "bruto" else "entrada normalizada"]
+    outros = [{"bruto": "entrada em [0,1]", "norm": "entrada normalizada",
+               "norm_img": "entrada normalizada por canal e por imagem"}[r["dados"]]]
     if c.get("weight_decay"):
         outros.append(f"L2 (weight decay) {c['weight_decay']:g}")
     if c.get("scheduler"):
-        outros.append("lr com decaimento cosseno")
+        outros.append({"cosine": "lr com decaimento cosseno", "onecycle": "lr one-cycle"}[c["scheduler"]])
     if c.get("augment_shift"):
         outros.append(f"translação ±{c['augment_shift']} px")
+    if c.get("augment_rot"):
+        outros.append(f"rotação ±{c['augment_rot']:g}° e escala ±{100 * c['augment_scale']:g}%")
     hp.append([f"E{r['exp']}", OPT[c.get("optimizer", "adam")], f"{c['lr']:g}", c["batch_size"], c["epochs"],
                para(", ".join(outros), SMALL)])
 story.append(table(hp, [1.2 * cm, 3.0 * cm, 1.6 * cm, 1.4 * cm, 1.5 * cm, 8.3 * cm], center_from=1))
@@ -141,9 +144,11 @@ mb = [["Item", "Valor"],
       ["Modelo", f"E{best['exp']} — {best['nome']}"],
       ["Arquitetura", para(T.MELHOR_ARQ, SMALL)],
       ["Hiperparâmetros", para(T.MELHOR_HP, SMALL)],
-      ["Acurácia de validação (E13, seleção)", f"{pct(best['val_acc'])} (época {best['melhor_epoca']} de {best['epocas']})"],
-      ["Acurácia de teste (E13, treinado com 90%)", pct(best["test_acc"])],
-      [para("<b>Acurácia de teste do modelo final</b> (retreinado com 100% do treino)", SMALL), para(f"<b>{pct(final['test_acc'])}</b>", SMALL)],
+      [f"Acurácia de validação (E{best['exp']}, seleção)", f"{pct(best['val_acc'])} (época {best['melhor_epoca']} de {best['epocas']})"],
+      [f"Acurácia de teste (E{best['exp']}, treinado com 90%)", pct(best["test_acc"])],
+      [para(f"Com média sobre {(2 * best['tta_raio'] + 1) ** 2} translações (E{best['exp']})", SMALL),
+       f"validação {pct(best['val_acc_tta'])} · teste {pct(best['test_acc_tta'])}"],
+      [para("<b>Acurácia de teste do modelo final</b> (retreinado com 100% do treino)", SMALL), para(f"<b>{pct(final['test_acc'])}</b> (sem a média sobre translações: {pct(final['test_acc_sem_tta'])})", SMALL)],
       ["Pesos do modelo final", "melhor_modelo.pt"]]
 story.append(table(mb, [6.2 * cm, 10.8 * cm], center_from=9))
 n_fig += 1

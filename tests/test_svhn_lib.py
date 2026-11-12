@@ -210,3 +210,53 @@ def test_norm_stats_sao_exatas_e_independem_do_layout_de_memoria():
     mean2, std2 = L.compute_norm_stats(X_nc)
     assert torch.equal(mean, mean2) and torch.equal(std, std2)
     assert mean.dtype == torch.float32 and std.dtype == torch.float32
+
+
+def test_per_image_norm_zera_media_e_ignora_brilho_e_contraste():
+    x = torch.rand(4, 3, 32, 32)
+    a = L.per_image_norm(x)
+    assert torch.allclose(a.mean(dim=(1, 2, 3)), torch.zeros(4), atol=1e-5)
+    assert torch.allclose(L.per_image_norm(x * 0.5 + 0.2), a, atol=2e-2)
+
+
+def test_random_affine_formato_determinismo_e_identidade():
+    x = torch.rand(5, 3, 32, 32)
+    a = L.random_affine(x, 2, 10.0, 0.1, torch.Generator().manual_seed(0))
+    b = L.random_affine(x, 2, 10.0, 0.1, torch.Generator().manual_seed(0))
+    assert a.shape == x.shape and torch.equal(a, b) and not torch.equal(a, x)
+    assert torch.allclose(L.random_affine(x, 0, 0.0, 0.0, torch.Generator()), x, atol=1e-5)
+
+
+def test_shift_fixed_desloca_o_conteudo():
+    x = torch.arange(16.0).view(1, 1, 4, 4)
+    assert torch.equal(L.shift_fixed(x, 0, 0), x)
+    assert torch.equal(L.shift_fixed(x, 1, 0)[0, 0, :, :3], x[0, 0, :, 1:])
+    assert torch.equal(L.shift_fixed(x, 0, -1)[0, 0, 1:], x[0, 0, :3])
+
+
+def test_predict_tta_raio_zero_igual_a_predict_e_probabilidades_somam_1():
+    torch.manual_seed(0)
+    m = L.MLP([16])
+    x = torch.randn(7, 3, 32, 32)
+    assert torch.equal(L.predict_tta(m, x, 0), L.predict(m, x))
+    p = L.predict_proba(m, x, 2)
+    assert p.shape == (7, 10) and torch.allclose(p.sum(1), torch.ones(7), atol=1e-5)
+
+
+def test_treino_com_onecycle_e_affine_e_reprodutivel():
+    def go():
+        L.set_seed(0)
+        X = torch.randn(64, 3, 32, 32)
+        d = dict(X_train=X, y_train=torch.randint(0, 10, (64,)), X_val=X[:16], y_val=torch.randint(0, 10, (16,)))
+        m = L.MLP([32], dropout=0.1, batchnorm=True)
+        return L.train_model(m, d, epochs=2, batch_size=16, lr=1e-3, optimizer="adamw", scheduler="onecycle",
+                             augment_shift=2, augment_rot=10.0, augment_scale=0.1, seed=0, verbose=False)
+    a, b = go(), go()
+    assert a["train_loss"] == b["train_loss"] and a["val_acc"] == b["val_acc"]
+
+
+def test_scheduler_desconhecido_da_erro():
+    X = torch.randn(8, 3, 32, 32)
+    with pytest.raises(ValueError):
+        L.train_model(L.MLP([8]), dict(X_train=X, y_train=torch.zeros(8, dtype=torch.long)),
+                      epochs=1, batch_size=8, lr=1e-3, scheduler="xyz", verbose=False)

@@ -22,7 +22,7 @@ Notebook com a implementação e todos os experimentos do trabalho. Ele é autos
 `svhn_lib.py` (modelos, laço de treino, avaliação, gráficos e predição) e as demais executam os experimentos.
 
 **Como rodar**
-- **Local:** `jupyter notebook trabalho_svhn.ipynb` (roda em CPU; cerca de 4 a 5 h no total).
+- **Local:** `jupyter notebook trabalho_svhn.ipynb` (roda em CPU; cerca de 9 a 10 h no total).
 - **Colab:** basta abrir este notebook e executar tudo (ative a GPU em *Ambiente de execução → Alterar tipo*).
 
 **Protocolo**
@@ -30,6 +30,8 @@ Notebook com a implementação e todos os experimentos do trabalho. Ele é autos
 - O `train` é dividido em **90% treino / 10% validação**, com divisão fixa pela semente 42.
 - A validação acompanha os experimentos e escolhe o modelo (e a melhor época de cada treino, por checkpoint).
 - O `test` só é usado para relatar o desempenho de cada experimento; **não** participa de nenhuma escolha.
+- O **modelo final é uma rede totalmente conectada (MLP)**, como definido pelo professor. A CNN (E12 e E13) entra
+  apenas como comparação e não concorre à escolha do modelo final.
 - Depois de escolhida a configuração, o modelo final é retreinado com todo o `train` (treino + validação), como o enunciado permite.
 - O conjunto adicional do professor é usado **apenas** na última seção, com o modelo final já definido.
 - Semente fixa (42) em tudo: rodar de novo reproduz os mesmos números na mesma máquina.
@@ -86,10 +88,12 @@ dist.index.name = 'dígito'; dist
 """)
 
 md(r"""
-**Pré-processamento.** Duas versões dos dados:
+**Pré-processamento.** Três versões dos dados:
 - `bruto`: pixels em [0, 1] (como no notebook da aula, só `ToTensor`).
 - `norm`: subtrai a média e divide pelo desvio padrão **de cada canal de cor**, calculados só no treino
   (slide de pré-processamento: "subtraia a média por canal"). Validação e teste usam os mesmos valores, sem vazamento.
+- `norm_img`: a versão `norm` seguida de uma normalização **por imagem** (subtrai a média e divide pelo desvio da
+  própria imagem). Usada só a partir do E16; remove diferenças de brilho e contraste entre as fotos.
 """)
 
 code(r"""
@@ -104,6 +108,7 @@ DATA = {
                   X_val=L.preprocess(X_va_u8, mean, std), y_val=y_val,
                   X_test=L.preprocess(X_test_u8, mean, std), y_test=y_test),
 }
+DATA['norm_img'] = {k: (L.per_image_norm(v) if k.startswith('X_') else v) for k, v in DATA['norm'].items()}
 """)
 
 md(r"""
@@ -329,6 +334,60 @@ run(13, 'CNN + augmentation', 'E12 + translação aleatória de ±2 px',
     epochs=20, batch_size=128, lr=1e-3, scheduler='cosine', augment_shift=2);
 """)
 
+md(r"""
+### De volta à MLP: E14 a E17
+
+O modelo final precisa ser uma rede totalmente conectada, então os próximos experimentos voltam à melhor MLP e
+tentam aproximá-la da CNN. A CNN ganha da MLP porque já "sabe" que um dígito deslocado é o mesmo dígito; a MLP
+precisa aprender isso com os dados.
+
+### E14 — melhor MLP + data augmentation
+A mesma translação aleatória de ±2 px do E13, agora na melhor MLP. Para a MLP, cada imagem deslocada é um exemplo
+novo.
+""")
+code(r"""
+run(14, 'MLP + augmentation', f"E{B_MLP['exp']} + translação aleatória de ±2 px",
+    lambda: L.MLP([1024, 512, 256], dropout=0.3, batchnorm=True), dados='norm', pai=B_MLP['exp'],
+    **dict(B_MLP['config'], augment_shift=2));
+r14 = RESULTS[-1]
+print(f"\nAcurácia de treino ({r14['train_acc']:.4f}) x validação ({r14['val_acc']:.4f}) na melhor época.")
+""")
+
+md(r"""
+### E15 — rede maior e treino mais longo
+Com dropout e augmentation, a acurácia de treino do E14 fica **abaixo** da de validação: a rede não está
+decorando o treino, está faltando capacidade e tempo de treino (underfitting). Por isso este experimento muda o
+"tamanho" do treino como um todo: 4 camadas ocultas de 2048 neurônios, dropout menor (0,1), 60 épocas e taxa de
+aprendizado maior (1e-3) com a política *one-cycle* (sobe nos primeiros 10% dos passos e depois decai até quase
+zero), otimizador AdamW e batch 128. São várias mudanças juntas, todas na mesma direção (mais capacidade e menos
+regularização); o efeito medido é o do conjunto.
+""")
+code(r"""
+MLP_G = lambda: L.MLP([2048, 2048, 2048, 2048], dropout=0.1, batchnorm=True)
+KW_G = dict(epochs=60, batch_size=128, lr=1e-3, optimizer='adamw', scheduler='onecycle', augment_shift=2)
+run(15, 'MLP grande', 'E14 com rede 4×2048, dropout 0,1, 60 épocas, lr 1e-3 one-cycle',
+    MLP_G, dados='norm', pai=14, **KW_G);
+""")
+
+md(r"""
+### E16 — E15 + normalização por imagem
+Além da média e do desvio por canal (do treino), cada imagem é normalizada pela sua própria média e desvio. Fotos
+escuras, claras ou de baixo contraste passam a ter a mesma faixa de valores.
+""")
+code(r"""
+run(16, 'MLP grande + norm. por imagem', 'E15 + normalização de contraste por imagem',
+    MLP_G, dados='norm_img', pai=15, **KW_G);
+""")
+
+md(r"""
+### E17 — E16 + rotação e escala no augmentation
+Além da translação, cada imagem de treino é girada em até ±10° e ampliada ou reduzida em até 10%.
+""")
+code(r"""
+run(17, 'MLP grande + rotação/escala', 'E16 + rotação ±10° e escala ±10% no augmentation',
+    MLP_G, dados='norm_img', pai=16, **dict(KW_G, augment_rot=10.0, augment_scale=0.1));
+""")
+
 md("## 4. Comparação dos experimentos")
 code(r"""
 df = pd.DataFrame(RESULTS).drop(columns=['config'])
@@ -352,54 +411,89 @@ ax[0].legend(fontsize=6.5, ncol=2); plt.tight_layout(); plt.savefig('resultados/
 
 md(r"""
 ## 5. Escolha do modelo
-Critério: **maior acurácia de validação**. O teste não participa da escolha.
+Critério: **maior acurácia de validação entre as redes totalmente conectadas** (o professor definiu que o modelo
+final deve ser uma MLP; a CNN fica como comparação). O teste não participa da escolha.
 """)
 code(r"""
-best = max(RESULTS, key=lambda r: r['val_acc'])
+CNNS = (12, 13)
+best = max((r for r in RESULTS if r['exp'] not in CNNS), key=lambda r: r['val_acc'])
+cnn = max((r for r in RESULTS if r['exp'] in CNNS), key=lambda r: r['val_acc'])
 print(f"Modelo escolhido: E{best['exp']} — {best['nome']}")
 print(f"val_acc = {best['val_acc']:.4f} | test_acc = {best['test_acc']:.4f} | melhor época {best['melhor_epoca']} de {best['epocas']}")
+print(f"Comparação: a melhor CNN (E{cnn['exp']}) tem val_acc = {cnn['val_acc']:.4f} e test_acc = {cnn['test_acc']:.4f}.")
+""")
+
+md(r"""
+### Predição com média sobre translações (test-time augmentation)
+A MLP não é invariante a translação. Na hora de predizer, em vez de passar a imagem uma única vez, passamos também
+as versões deslocadas de −r a +r pixels em cada direção e fazemos a **média das probabilidades**. Os pesos não
+mudam; só a forma de predizer. O raio r (0 = sem média, 1 = 9 translações, 2 = 25 translações) é escolhido pela
+**validação**.
+""")
+code(r"""
+make_model, dados_best, kw_best = REGISTRY[best['exp']]
+m_best = make_model()
+m_best.load_state_dict(torch.load(f"pesos/E{best['exp']}.pt")['state_dict'])
+d = DATA[dados_best]
+TTA = []
+for r in (0, 1, 2):
+    va = (L.predict_tta(m_best, d['X_val'], r) == d['y_val']).float().mean().item()
+    te = (L.predict_tta(m_best, d['X_test'], r) == d['y_test']).float().mean().item()
+    TTA.append(dict(raio=r, n_translacoes=(2 * r + 1) ** 2, val_acc=va, test_acc=te))
+    print(f"raio {r} ({(2 * r + 1) ** 2:2d} translações): val_acc = {va:.4f} | test_acc = {te:.4f}")
+T_BEST = max(TTA, key=lambda t: t['val_acc'])
+TTA_R = T_BEST['raio']
+print(f"\nRaio escolhido pela validação: {TTA_R}")
 with open('resultados/melhor_modelo.json', 'w') as f:
-    json.dump(best, f, indent=1)
+    json.dump(dict(best, tta=TTA, tta_raio=TTA_R, val_acc_tta=T_BEST['val_acc'], test_acc_tta=T_BEST['test_acc'],
+                   arquitetura=m_best.config, cnn=cnn), f, indent=1)
 """)
 
 md(r"""
 ## 6. Modelo final: retreino com todo o conjunto de treino
 
 O enunciado permite que a versão final use todo o `train`. Com a configuração já escolhida pela validação
-(arquitetura, hiperparâmetros e número de épocas do experimento vencedor), retreinamos o modelo com
+(arquitetura, hiperparâmetros, número de épocas e raio da média sobre translações), retreinamos o modelo com
 **treino + validação (73.257 imagens)**, com a mesma semente. Nada é ajustado nesta etapa: não há mais validação,
-e o modelo fica com os pesos da última época (a taxa de aprendizado com decaimento cosseno termina em zero, então
-o fim do treino é estável). O teste continua servindo só para relatar o resultado.
+e o modelo fica com os pesos da última época (a taxa de aprendizado termina perto de zero, então o fim do treino
+é estável). O teste continua servindo só para relatar o resultado.
 """)
 code(r"""
-make_model, dados_best, kw_best = REGISTRY[best['exp']]
-usa_norm = dados_best == 'norm'
-mean_f, std_f = L.compute_norm_stats(X_all) if usa_norm else (None, None)   # estatísticas de todo o treino
-prep = lambda X: L.preprocess(X, mean_f, std_f) if usa_norm else L.preprocess(X)
+mean_f, std_f = L.compute_norm_stats(X_all)   # estatísticas de todo o treino
+
+def prep(X):
+    "Mesmo pré-processamento do experimento escolhido, com as estatísticas de todo o treino."
+    if dados_best == 'bruto':
+        return L.preprocess(X)
+    Xf = L.preprocess(X, mean_f, std_f)
+    return L.per_image_norm(Xf) if dados_best == 'norm_img' else Xf
 
 L.set_seed(SEED)
 final_model = make_model()
 t0 = time.time()
 hist_final = L.train_model(final_model, dict(X_train=prep(X_all), y_train=y_all), seed=SEED, device=device, **kw_best)
 X_test_f = prep(X_test_u8)
-final_test_loss, final_test_acc = L.evaluate(final_model, X_test_f, y_test, device=device)
-print(f"\nModelo final (E{best['exp']} retreinado com treino + validação): test_acc = {final_test_acc:.4f} "
-      f"(o mesmo modelo treinado só com 90% teve {best['test_acc']:.4f}) | {(time.time() - t0) / 60:.1f} min")
+final_test_loss, acc_sem_tta = L.evaluate(final_model, X_test_f, y_test, device=device)
+pred_test = L.predict_tta(final_model, X_test_f, TTA_R, device=device)
+final_test_acc = (pred_test == y_test).float().mean().item()
+print(f"\nModelo final (E{best['exp']} retreinado com treino + validação) | {(time.time() - t0) / 60:.1f} min")
+print(f"test_acc = {final_test_acc:.4f} com média sobre translações (raio {TTA_R}) | {acc_sem_tta:.4f} sem a média")
+print(f"(o mesmo modelo treinado só com 90%: {T_BEST['test_acc']:.4f} com a média | {best['test_acc']:.4f} sem)")
 
 torch.save({'exp': best['exp'], 'nome': best['nome'], 'state_dict': final_model.state_dict(),
-            'mean': mean_f, 'std': std_f, 'dados': dados_best, 'config': kw_best,
+            'arquitetura': final_model.config, 'mean': mean_f, 'std': std_f, 'dados': dados_best,
+            'tta_raio': TTA_R, 'config': kw_best,
             'val_acc_selecao': best['val_acc'], 'test_acc': final_test_acc}, 'melhor_modelo.pt')
 with open('resultados/final.json', 'w') as f:
     json.dump({'exp': best['exp'], 'nome': best['nome'], 'n_treino': len(X_all), 'hist': hist_final,
-               'test_loss': final_test_loss, 'test_acc': final_test_acc,
-               'test_acc_selecao': best['test_acc'], 'val_acc_selecao': best['val_acc']}, f, indent=1)
+               'test_loss': final_test_loss, 'test_acc': final_test_acc, 'test_acc_sem_tta': acc_sem_tta,
+               'tta_raio': TTA_R, 'test_acc_selecao': best['test_acc'], 'val_acc_selecao': best['val_acc']}, f, indent=1)
 L.plot_history(hist_final, 'Modelo final — retreino com treino + validação', 'resultados/final_curvas.png'); plt.show()
 print('pesos salvos em melhor_modelo.pt')
 """)
 
 md("### Matriz de confusão do modelo final no teste")
 code(r"""
-pred_test = L.predict(final_model, X_test_f, device=device)
 cm = L.confusion_matrix(y_test, pred_test)
 acc_classe = cm.diag().float() / cm.sum(1).float()
 
@@ -425,7 +519,7 @@ with open('resultados/final_confusao.json', 'w') as f:
 md(r"""
 ## 7. Predição do conjunto adicional
 Feita **somente agora**, com o modelo final já definido. O pré-processamento é o mesmo do treino do modelo final
-(mesma média e desvio). As imagens são lidas em **ordem do nome do arquivo** (ordenação numérica: `2.png` antes de
+(mesma média e desvio, mesma média sobre translações). As imagens são lidas em **ordem do nome do arquivo** (ordenação numérica: `2.png` antes de
 `10.png`), e o arquivo de saída tem um inteiro de 0 a 9 por linha, na mesma ordem.
 
 As imagens do professor devem estar na pasta `extra/` (conteúdo de `images.zip`).
@@ -436,7 +530,7 @@ PASTA_EXTRA = 'extra'
 
 if os.path.isdir(PASTA_EXTRA):
     nomes_arq, X_extra_u8 = L.load_image_folder(PASTA_EXTRA)
-    preds = L.predict(final_model, prep(X_extra_u8), device=device)
+    preds = L.predict_tta(final_model, prep(X_extra_u8), TTA_R, device=device)
     saida = f'{NOMES}_RESULTS.txt'
     L.write_results(preds, saida)
     print(f'{len(preds)} imagens -> {saida}')
@@ -446,7 +540,14 @@ else:
     print(f'Pasta {PASTA_EXTRA}/ não encontrada: baixe o conjunto adicional e rode esta célula de novo.')
 """)
 
+import os, re
+SMOKE = os.environ.get("SVHN_SMOKE")
+if SMOKE:  # versão reduzida só para testar o fluxo do notebook (não é a entrega)
+    for c in C:
+        c.source = re.sub(r"epochs=\d+", "epochs=2", c.source)
+        c.source = c.source.replace("idx_tr, idx_va =", "X_all, y_all, X_test_u8, y_test = X_all[:3000], y_all[:3000], X_test_u8[:800], y_test[:800]\nidx_tr, idx_va =")
+        c.source = c.source.replace("PASTA_EXTRA = 'extra'", "PASTA_EXTRA = 'extra_mini'")
 nb.cells = C
 nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-nbf.write(nb, ROOT / "trabalho_svhn.ipynb")
+nbf.write(nb, Path(SMOKE) / "trabalho_svhn.ipynb" if SMOKE else ROOT / "trabalho_svhn.ipynb")
 print("ok:", len(C), "células")

@@ -4,6 +4,7 @@ Tudo que o notebook usa fica aqui para poder ser testado (tests/) e reaproveitad
 pelo script de predição do conjunto adicional.
 """
 import copy
+import math
 import os
 import random
 import re
@@ -113,6 +114,45 @@ def preprocess(X: torch.Tensor, mean=None, std=None) -> torch.Tensor:
     return Xf
 
 
+def per_image_norm(Xf: torch.Tensor, eps: float = 1e-3) -> torch.Tensor:
+    """Normalização de contraste por imagem: subtrai a média e divide pelo desvio da própria imagem.
+
+    Remove diferenças de brilho e contraste entre fotos (sombra, placa clara ou escura). Só usa a
+    própria imagem, então vale igual para treino, validação, teste e conjunto adicional.
+    """
+    m = Xf.mean(dim=(1, 2, 3), keepdim=True)
+    s = Xf.std(dim=(1, 2, 3), keepdim=True)
+    return (Xf - m) / (s + eps)
+
+
+def random_affine(x: torch.Tensor, max_shift: int, max_rot: float, max_scale: float,
+                  gen: torch.Generator) -> torch.Tensor:
+    """Data augmentation: translação (até `max_shift` px), rotação (até `max_rot` graus) e
+    escala (fator entre 1 - max_scale e 1 + max_scale) aleatórias, com interpolação bilinear."""
+    B = len(x)
+    ang = (torch.rand(B, generator=gen) * 2 - 1) * math.radians(max_rot)
+    sc = 1 + (torch.rand(B, generator=gen) * 2 - 1) * max_scale
+    t = (torch.rand(B, 2, generator=gen) * 2 - 1) * (2 * max_shift / x.shape[-1])
+    theta = torch.zeros(B, 2, 3)
+    theta[:, 0, 0] = torch.cos(ang) / sc
+    theta[:, 0, 1] = -torch.sin(ang) / sc
+    theta[:, 1, 0] = torch.sin(ang) / sc
+    theta[:, 1, 1] = torch.cos(ang) / sc
+    theta[:, :, 2] = t
+    grid = F.affine_grid(theta.to(x.device), list(x.shape), align_corners=False)
+    return F.grid_sample(x, grid, mode="bilinear", padding_mode="border", align_corners=False)
+
+
+def shift_fixed(x: torch.Tensor, dx: int, dy: int) -> torch.Tensor:
+    """Translada o lote inteiro em (dx, dy) pixels, replicando a borda."""
+    if dx == 0 and dy == 0:
+        return x
+    p = max(abs(dx), abs(dy))
+    H, W = x.shape[-2:]
+    xp = F.pad(x, (p, p, p, p), mode="replicate")
+    return xp[:, :, p + dy:p + dy + H, p + dx:p + dx + W]
+
+
 def random_shift(x: torch.Tensor, max_shift: int, gen: torch.Generator) -> torch.Tensor:
     """Data augmentation: translada cada imagem até `max_shift` pixels (borda replicada).
 
@@ -156,6 +196,7 @@ class MLP(nn.Module):
     def __init__(self, hidden_sizes, dropout: float = 0.0, batchnorm: bool = False,
                  in_features: int = 3 * 32 * 32, n_classes: int = N_CLASSES):
         super().__init__()
+        self.config = dict(hidden_sizes=list(hidden_sizes), dropout=dropout, batchnorm=batchnorm)
         layers, prev = [], in_features
         for h in hidden_sizes:
             layers.append(nn.Linear(prev, h))
@@ -221,12 +262,15 @@ def evaluate(model, X, y, batch_size: int = 2048, device=None):
 def train_model(model, data, epochs: int, batch_size: int, lr: float,
                 optimizer: str = "adam", weight_decay: float = 0.0,
                 scheduler: str | None = None, augment_shift: int = 0,
+                augment_rot: float = 0.0, augment_scale: float = 0.0,
                 seed: int = SEED, device=None, verbose: bool = True):
     """Treina `model` e registra loss/acurácia de treino e validação a cada época.
 
     `data` precisa das chaves X_train, y_train e, opcionalmente, X_val, y_val (tensores já
     pré-processados). Com validação, o modelo termina com os pesos da época de MAIOR acurácia
-    de validação (checkpoint do melhor modelo). Sem validação (retreino final com treino +
+    de validação (checkpoint do melhor modelo). `scheduler`: None (lr constante), "cosine"
+    (decai a cada época) ou "onecycle" (sobe nos primeiros 10% dos passos e depois decai até ~0).
+    `augment_rot`/`augment_scale` ligam rotação e escala aleatórias (junto com a translação). Sem validação (retreino final com treino +
     validação), termina com os pesos da última época. Retorna o histórico (dict).
     """
     device = device or get_device()
@@ -247,6 +291,12 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
     X_tr, y_tr = data["X_train"], data["y_train"]
     has_val = "X_val" in data
     n = len(X_tr)
+    onecycle = None
+    if scheduler == "onecycle":
+        onecycle = torch.optim.lr_scheduler.OneCycleLR(
+            opt, max_lr=lr, total_steps=epochs * math.ceil(n / batch_size), pct_start=0.1)
+    elif scheduler not in (None, "cosine"):
+        raise ValueError(f"scheduler desconhecido: {scheduler}")
     hist = {k: [] for k in ("train_loss", "train_acc", "val_loss", "val_acc", "epoch_time")}
     best_acc, best_state, best_epoch = -1.0, None, -1
 
@@ -258,7 +308,9 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
         for i in range(0, n, batch_size):
             idx = perm[i:i + batch_size]
             xb = X_tr[idx]
-            if augment_shift:
+            if augment_rot or augment_scale:
+                xb = random_affine(xb, augment_shift, augment_rot, augment_scale, gen)
+            elif augment_shift:
                 xb = random_shift(xb, augment_shift, gen)
             xb, yb = xb.to(device), y_tr[idx].to(device)
 
@@ -267,6 +319,8 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
             opt.zero_grad()
             loss.backward()
             opt.step()
+            if onecycle:
+                onecycle.step()
 
             run_loss += loss.item() * len(idx)
             run_correct += (out.argmax(1) == yb).sum().item()
@@ -309,6 +363,30 @@ def predict(model, X, batch_size: int = 2048, device=None) -> torch.Tensor:
     model.eval()
     preds = [model(X[i:i + batch_size].to(device)).argmax(1).cpu() for i in range(0, len(X), batch_size)]
     return torch.cat(preds).long()
+
+
+@torch.no_grad()
+def predict_proba(model, X, tta_radius: int = 0, batch_size: int = 2048, device=None) -> torch.Tensor:
+    """Probabilidades (softmax) por classe. Com `tta_radius` = r > 0, faz a média das probabilidades
+    sobre as (2r + 1)² translações da imagem de -r a +r pixels (test-time augmentation): a MLP não é
+    invariante a translação, então a média sobre pequenos deslocamentos deixa a predição mais estável."""
+    device = device or next(model.parameters()).device
+    model.eval()
+    r = tta_radius
+    out = []
+    for i in range(0, len(X), batch_size):
+        xb = X[i:i + batch_size].to(device)
+        p = torch.zeros(len(xb), N_CLASSES, device=device)
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                p += F.softmax(model(shift_fixed(xb, dx, dy)), dim=1)
+        out.append((p / (2 * r + 1) ** 2).cpu())
+    return torch.cat(out)
+
+
+def predict_tta(model, X, tta_radius: int = 0, batch_size: int = 2048, device=None) -> torch.Tensor:
+    """Classe predita (argmax da média das probabilidades sobre as translações)."""
+    return predict_proba(model, X, tta_radius, batch_size, device).argmax(1).long()
 
 
 # ---------------------------------------------------------------------------

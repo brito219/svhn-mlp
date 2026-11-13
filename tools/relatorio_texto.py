@@ -273,5 +273,6 @@ ENTREGAVEIS = [
     "experimento.",
     "<b>melhor_modelo.pt</b>: pesos do modelo final, com a arquitetura, a média e o desvio da normalização e o raio da média sobre translações.",
     f"<b>{ARQ_RESULTADOS}</b>: 203.856 linhas, uma predição (0 a 9) por imagem do conjunto adicional.",
+    "<b>svhn_lib.py</b>: o mesmo código que a primeira célula do notebook grava (vai junto só por conveniência).",
     "<b>relatorio.pdf</b>: este relatório.",
 ]

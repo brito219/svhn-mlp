@@ -71,6 +71,7 @@ def table(data, col_widths, highlight_row=None, center_from=2, font=8.2):
 
 pct = lambda v: f"{100 * v:.2f}%".replace(".", ",")
 num = lambda v, n=3: f"{v:.{n}f}".replace(".", ",")
+exp10 = lambda v: f"1e{round(__import__('math').log10(v))}" if abs(__import__('math').log10(v) - round(__import__('math').log10(v))) < 1e-9 else f"{v:g}"
 milhar = lambda v: f"{v:,}".replace(",", ".")
 story = []
 
@@ -98,14 +99,14 @@ for r in rows:
     outros = [{"bruto": "entrada em [0,1]", "norm": "entrada normalizada",
                "norm_img": "entrada normalizada por canal e por imagem"}[r["dados"]]]
     if c.get("weight_decay"):
-        outros.append(f"L2 (weight decay) {c['weight_decay']:g}")
+        outros.append(f"L2 (weight decay) {exp10(c['weight_decay'])}")
     if c.get("scheduler"):
         outros.append({"cosine": "lr com decaimento cosseno", "onecycle": "lr one-cycle"}[c["scheduler"]])
     if c.get("augment_shift"):
         outros.append(f"translação ±{c['augment_shift']} px")
     if c.get("augment_rot"):
         outros.append(f"rotação ±{c['augment_rot']:g}° e escala ±{100 * c['augment_scale']:g}%")
-    hp.append([f"E{r['exp']}", OPT[c.get("optimizer", "adam")], f"{c['lr']:g}", c["batch_size"], c["epochs"],
+    hp.append([f"E{r['exp']}", OPT[c.get("optimizer", "adam")], exp10(c['lr']), c["batch_size"], c["epochs"],
                para(", ".join(outros), SMALL)])
 story.append(table(hp, [1.2 * cm, 3.0 * cm, 1.6 * cm, 1.4 * cm, 1.5 * cm, 8.3 * cm], center_from=1))
 story += [para(t) for t in T.HIPER_NOTA]

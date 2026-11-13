@@ -269,9 +269,9 @@ DIFICULDADES = [
 ]
 
 ENTREGAVEIS = [
-    "<b>trabalho_svhn.ipynb</b>: implementação e todos os experimentos, com as saídas (também grava "
-    "<i>svhn_lib.py</i>, com 29 testes automatizados em <i>tests/</i>).",
+    "<b>trabalho_svhn.ipynb</b>: implementação e todos os experimentos, com as saídas e as curvas de cada "
+    "experimento.",
     "<b>melhor_modelo.pt</b>: pesos do modelo final, com a arquitetura, a média e o desvio da normalização e o raio da média sobre translações.",
     f"<b>{ARQ_RESULTADOS}</b>: 203.856 linhas, uma predição (0 a 9) por imagem do conjunto adicional.",
-    "<b>relatorio.pdf</b>: este relatório. O histórico completo de cada experimento está em <i>resultados/</i>.",
+    "<b>relatorio.pdf</b>: este relatório.",
 ]

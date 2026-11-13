@@ -57,7 +57,7 @@ Partimos do código das aulas (classificador linear e MLP) e adaptamos para o SV
 - `load_image_folder` e `write_results`: leem as imagens de uma pasta em ordem do nome e gravam uma predição por
   linha.
 
-O arquivo também tem testes automatizados em `tests/`.
+A célula abaixo grava o `svhn_lib.py`, que é importado nas células seguintes.
 """)
 code("%%writefile svhn_lib.py\n" + (ROOT / "svhn_lib.py").read_text())
 

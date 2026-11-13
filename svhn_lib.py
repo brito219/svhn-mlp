@@ -1,8 +1,3 @@
-"""Funções de apoio do trabalho de classificação de dígitos no SVHN.
-
-Tudo que o notebook usa fica aqui para poder ser testado (tests/) e reaproveitado
-pelo script de predição do conjunto adicional.
-"""
 import copy
 import math
 import os
@@ -21,12 +16,7 @@ N_CLASSES = 10
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 
 
-# ---------------------------------------------------------------------------
-# Reprodutibilidade
-# ---------------------------------------------------------------------------
-
 def set_seed(seed: int = SEED) -> None:
-    """Fixa todas as sementes (Python, NumPy, PyTorch CPU/GPU)."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -39,15 +29,7 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# ---------------------------------------------------------------------------
-# Dados
-# ---------------------------------------------------------------------------
-
 def load_parquet_split(path):
-    """Lê um split do espelho oficial do SVHN no Hugging Face (ufldl-stanford/svhn, cropped_digits).
-
-    Mesmas imagens, mesma ordem e mesmos rótulos (0-9) de torchvision.datasets.SVHN.
-    """
     import io
 
     import pandas as pd
@@ -60,12 +42,6 @@ def load_parquet_split(path):
 
 
 def load_svhn(root: str = "data", hf_root: str = "data_hf"):
-    """Carrega os splits 'train' e 'test' do SVHN como tensores uint8 (N, 3, 32, 32).
-
-    Usa torchvision.datasets.SVHN (que converte o rótulo 10 do .mat para 0). Se os .mat não
-    estiverem em `root` mas houver o espelho parquet em `hf_root` (servidor de Stanford instável),
-    lê dele — o conteúdo e a ordem são os mesmos.
-    """
     import torchvision
 
     out = []
@@ -75,14 +51,13 @@ def load_svhn(root: str = "data", hf_root: str = "data_hf"):
             out.append(load_parquet_split(pq))
             continue
         ds = torchvision.datasets.SVHN(root=root, split=split, download=True)
-        X = torch.from_numpy(ds.data)  # já vem em (N, 3, 32, 32), uint8
+        X = torch.from_numpy(ds.data)
         y = torch.from_numpy(ds.labels.astype(np.int64))
         out.append((X, y))
     return out[0], out[1]
 
 
 def split_train_val(n: int, val_frac: float = 0.1, seed: int = SEED):
-    """Índices de treino/validação: embaralhamento fixo pela semente."""
     g = torch.Generator().manual_seed(seed)
     perm = torch.randperm(n, generator=g)
     n_val = int(round(n * val_frac))
@@ -90,24 +65,16 @@ def split_train_val(n: int, val_frac: float = 0.1, seed: int = SEED):
 
 
 def compute_norm_stats(X: torch.Tensor):
-    """Média e desvio padrão por canal (em escala [0, 1]), calculados só no treino.
-
-    Usa somas inteiras exatas dos pixels uint8. Somar dezenas de milhões de valores em float32
-    dá resultados que mudam na 7ª casa conforme a ordem da soma (número de threads, alinhamento
-    de memória), e essa diferença se amplifica no treino; com inteiros, o resultado é sempre o
-    mesmo, o que garante a reprodutibilidade.
-    """
     means, stds = [], []
     for c in range(X.shape[1]):
         xc = X[:, c].to(torch.int64)
-        n, s, ss = xc.numel(), int(xc.sum()), int((xc * xc).sum())  # inteiros exatos
+        n, s, ss = xc.numel(), int(xc.sum()), int((xc * xc).sum())
         means.append(s / n / 255.0)
-        stds.append(((ss * n - s * s) / (n * (n - 1))) ** 0.5 / 255.0)  # desvio amostral (n - 1)
+        stds.append(((ss * n - s * s) / (n * (n - 1))) ** 0.5 / 255.0)
     return torch.tensor(means, dtype=torch.float32), torch.tensor(stds, dtype=torch.float32)
 
 
 def preprocess(X: torch.Tensor, mean=None, std=None) -> torch.Tensor:
-    """uint8 -> float em [0, 1]; se houver mean/std, normaliza por canal."""
     Xf = X.float() / 255.0
     if mean is not None:
         Xf = (Xf - mean.view(1, -1, 1, 1)) / std.view(1, -1, 1, 1)
@@ -115,11 +82,6 @@ def preprocess(X: torch.Tensor, mean=None, std=None) -> torch.Tensor:
 
 
 def per_image_norm(Xf: torch.Tensor, eps: float = 1e-3) -> torch.Tensor:
-    """Normalização de contraste por imagem: subtrai a média e divide pelo desvio da própria imagem.
-
-    Remove diferenças de brilho e contraste entre fotos (sombra, placa clara ou escura). Só usa a
-    própria imagem, então vale igual para treino, validação, teste e conjunto adicional.
-    """
     m = Xf.mean(dim=(1, 2, 3), keepdim=True)
     s = Xf.std(dim=(1, 2, 3), keepdim=True)
     return (Xf - m) / (s + eps)
@@ -127,8 +89,6 @@ def per_image_norm(Xf: torch.Tensor, eps: float = 1e-3) -> torch.Tensor:
 
 def random_affine(x: torch.Tensor, max_shift: int, max_rot: float, max_scale: float,
                   gen: torch.Generator) -> torch.Tensor:
-    """Data augmentation: translação (até `max_shift` px), rotação (até `max_rot` graus) e
-    escala (fator entre 1 - max_scale e 1 + max_scale) aleatórias, com interpolação bilinear."""
     B = len(x)
     ang = (torch.rand(B, generator=gen) * 2 - 1) * math.radians(max_rot)
     sc = 1 + (torch.rand(B, generator=gen) * 2 - 1) * max_scale
@@ -144,7 +104,6 @@ def random_affine(x: torch.Tensor, max_shift: int, max_rot: float, max_scale: fl
 
 
 def shift_fixed(x: torch.Tensor, dx: int, dy: int) -> torch.Tensor:
-    """Translada o lote inteiro em (dx, dy) pixels, replicando a borda."""
     if dx == 0 and dy == 0:
         return x
     p = max(abs(dx), abs(dy))
@@ -154,10 +113,6 @@ def shift_fixed(x: torch.Tensor, dx: int, dy: int) -> torch.Tensor:
 
 
 def random_shift(x: torch.Tensor, max_shift: int, gen: torch.Generator) -> torch.Tensor:
-    """Data augmentation: translada cada imagem até `max_shift` pixels (borda replicada).
-
-    Não usamos flip horizontal porque ele muda o significado de alguns dígitos.
-    """
     if max_shift <= 0:
         return x
     B, C, H, W = x.shape
@@ -165,20 +120,14 @@ def random_shift(x: torch.Tensor, max_shift: int, gen: torch.Generator) -> torch
     xp = F.pad(x, (p, p, p, p), mode="replicate")
     dx = torch.randint(0, 2 * p + 1, (B,), generator=gen).to(x.device)
     dy = torch.randint(0, 2 * p + 1, (B,), generator=gen).to(x.device)
-    rows = dy[:, None] + torch.arange(H, device=x.device)  # (B, H)
-    cols = dx[:, None] + torch.arange(W, device=x.device)  # (B, W)
+    rows = dy[:, None] + torch.arange(H, device=x.device)
+    cols = dx[:, None] + torch.arange(W, device=x.device)
     b = torch.arange(B, device=x.device)[:, None, None]
-    out = xp.permute(0, 2, 3, 1)[b, rows[:, :, None], cols[:, None, :]]  # (B, H, W, C)
+    out = xp.permute(0, 2, 3, 1)[b, rows[:, :, None], cols[:, None, :]]
     return out.permute(0, 3, 1, 2).contiguous()
 
 
-# ---------------------------------------------------------------------------
-# Modelos
-# ---------------------------------------------------------------------------
-
 class LinearClassifier(nn.Module):
-    """logits = x W + b, com x = imagem achatada (3*32*32 = 3072 entradas)."""
-
     def __init__(self, in_features: int = 3 * 32 * 32, n_classes: int = N_CLASSES):
         super().__init__()
         self.fc = nn.Linear(in_features, n_classes)
@@ -188,11 +137,6 @@ class LinearClassifier(nn.Module):
 
 
 class MLP(nn.Module):
-    """Rede totalmente conectada com camadas ocultas configuráveis.
-
-    Cada camada oculta: Linear -> [BatchNorm] -> ReLU -> [Dropout].
-    """
-
     def __init__(self, hidden_sizes, dropout: float = 0.0, batchnorm: bool = False,
                  in_features: int = 3 * 32 * 32, n_classes: int = N_CLASSES):
         super().__init__()
@@ -218,14 +162,12 @@ def _conv_bn(cin, cout):
 
 
 class CNN(nn.Module):
-    """CNN pequena: 3 blocos convolucionais (32 -> 64 -> 128 filtros) + classificador MLP."""
-
     def __init__(self, dropout: float = 0.3, n_classes: int = N_CLASSES):
         super().__init__()
         self.features = nn.Sequential(
-            *_conv_bn(3, 32), *_conv_bn(32, 32), nn.MaxPool2d(2),     # 32 -> 16
-            *_conv_bn(32, 64), *_conv_bn(64, 64), nn.MaxPool2d(2),    # 16 -> 8
-            *_conv_bn(64, 128), *_conv_bn(128, 128), nn.MaxPool2d(2),  # 8 -> 4
+            *_conv_bn(3, 32), *_conv_bn(32, 32), nn.MaxPool2d(2),
+            *_conv_bn(32, 64), *_conv_bn(64, 64), nn.MaxPool2d(2),
+            *_conv_bn(64, 128), *_conv_bn(128, 128), nn.MaxPool2d(2),
         )
         self.classifier = nn.Sequential(
             nn.Flatten(), nn.Dropout(dropout),
@@ -241,13 +183,8 @@ def count_params(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-# ---------------------------------------------------------------------------
-# Treino e avaliação
-# ---------------------------------------------------------------------------
-
 @torch.no_grad()
 def evaluate(model, X, y, batch_size: int = 2048, device=None):
-    """Retorna (loss média, acurácia) com o modelo em modo de avaliação."""
     device = device or next(model.parameters()).device
     model.eval()
     total_loss, correct = 0.0, 0
@@ -264,18 +201,9 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
                 scheduler: str | None = None, augment_shift: int = 0,
                 augment_rot: float = 0.0, augment_scale: float = 0.0,
                 seed: int = SEED, device=None, verbose: bool = True):
-    """Treina `model` e registra loss/acurácia de treino e validação a cada época.
-
-    `data` precisa das chaves X_train, y_train e, opcionalmente, X_val, y_val (tensores já
-    pré-processados). Com validação, o modelo termina com os pesos da época de MAIOR acurácia
-    de validação (checkpoint do melhor modelo). `scheduler`: None (lr constante), "cosine"
-    (decai a cada época) ou "onecycle" (sobe nos primeiros 10% dos passos e depois decai até ~0).
-    `augment_rot`/`augment_scale` ligam rotação e escala aleatórias (junto com a translação). Sem validação (retreino final com treino +
-    validação), termina com os pesos da última época. Retorna o histórico (dict).
-    """
     device = device or get_device()
-    torch.manual_seed(seed)  # dropout e inicializações tardias
-    gen = torch.Generator().manual_seed(seed)  # ordem dos mini-batches e augmentation
+    torch.manual_seed(seed)
+    gen = torch.Generator().manual_seed(seed)
     model.to(device)
 
     if optimizer == "adam":
@@ -352,7 +280,6 @@ def train_model(model, data, epochs: int, batch_size: int, lr: float,
 
 
 def confusion_matrix(y_true, y_pred, n_classes: int = N_CLASSES) -> torch.Tensor:
-    """cm[i, j] = nº de exemplos da classe i preditos como j."""
     idx = y_true.long() * n_classes + y_pred.long()
     return torch.bincount(idx, minlength=n_classes * n_classes).view(n_classes, n_classes)
 
@@ -367,9 +294,6 @@ def predict(model, X, batch_size: int = 2048, device=None) -> torch.Tensor:
 
 @torch.no_grad()
 def predict_proba(model, X, tta_radius: int = 0, batch_size: int = 2048, device=None) -> torch.Tensor:
-    """Probabilidades (softmax) por classe. Com `tta_radius` = r > 0, faz a média das probabilidades
-    sobre as (2r + 1)² translações da imagem de -r a +r pixels (test-time augmentation): a MLP não é
-    invariante a translação, então a média sobre pequenos deslocamentos deixa a predição mais estável."""
     device = device or next(model.parameters()).device
     model.eval()
     r = tta_radius
@@ -385,16 +309,10 @@ def predict_proba(model, X, tta_radius: int = 0, batch_size: int = 2048, device=
 
 
 def predict_tta(model, X, tta_radius: int = 0, batch_size: int = 2048, device=None) -> torch.Tensor:
-    """Classe predita (argmax da média das probabilidades sobre as translações)."""
     return predict_proba(model, X, tta_radius, batch_size, device).argmax(1).long()
 
 
-# ---------------------------------------------------------------------------
-# Gráficos
-# ---------------------------------------------------------------------------
-
 def plot_history(hist, title: str = "", path=None):
-    """Curvas de Loss e Acurácia (treino x validação) ao longo das épocas."""
     import matplotlib.pyplot as plt
 
     ep = range(1, len(hist["train_loss"]) + 1)
@@ -419,17 +337,11 @@ def plot_history(hist, title: str = "", path=None):
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Conjunto adicional e arquivo de resultados
-# ---------------------------------------------------------------------------
-
 def natural_sort_key(name: str):
-    """'img_2' < 'img_10' (ordenação numérica, não alfabética)."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", str(name))]
 
 
 def load_image_folder(folder):
-    """Lê todas as imagens da pasta em ordem natural do nome -> (nomes, uint8 (N, 3, 32, 32))."""
     from PIL import Image
 
     folder = Path(folder)
@@ -447,7 +359,6 @@ def load_image_folder(folder):
 
 
 def write_results(preds, path) -> None:
-    """Grava uma predição (inteiro 0-9) por linha, na ordem recebida."""
     vals = [int(v) for v in (preds.tolist() if hasattr(preds, "tolist") else preds)]
     if any(v < 0 or v > 9 for v in vals):
         raise ValueError("predições devem ser inteiros entre 0 e 9")

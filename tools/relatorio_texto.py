@@ -12,7 +12,7 @@ _best = json.load(open(RES / "melhor_modelo.json"))
 _conf = json.load(open(RES / "final_confusao.json"))
 pct = lambda v: f"{100 * v:.2f}%".replace(".", ",")
 
-AUTORES = "João Pedro · Samyr · Valber"
+AUTORES = "João Pedro Santos de Brito · Samyr Arruda Villanova · Valber Oliveira da Conceição"
 DISCIPLINA = "Inteligência Artificial — Trabalho Final"
 ARQ_RESULTADOS = "JOAOPEDRO_SAMYR_VALBER_RESULTS.txt"
 

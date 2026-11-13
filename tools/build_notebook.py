@@ -14,35 +14,50 @@ md = lambda s: C.append(nbf.v4.new_markdown_cell(s.strip()))
 code = lambda s: C.append(nbf.v4.new_code_cell(s.strip()))
 
 md(r"""
-# Classificação de Dígitos no SVHN — Classificador Linear, MLP e CNN
+# Classificação de Dígitos no SVHN
 
-**Grupo:** João Pedro, Samyr e Valber
+**Integrantes:** João Pedro Santos de Brito, Samyr Arruda Villanova e Valber Oliveira da Conceição
 
-Notebook com a implementação e todos os experimentos do trabalho. Ele é autossuficiente: a primeira célula grava
-`svhn_lib.py` (modelos, laço de treino, avaliação, gráficos e predição) e as demais executam os experimentos.
+Trabalho final de Inteligência Artificial. Treinamos um classificador linear, várias MLPs e, para comparação, uma
+CNN no SVHN. A primeira célula grava o `svhn_lib.py`, com as funções usadas no resto do notebook.
 
-**Como rodar**
-- **Local:** `jupyter notebook trabalho_svhn.ipynb` (roda em CPU; cerca de 9 a 10 h no total).
-- **Colab:** basta abrir este notebook e executar tudo (ative a GPU em *Ambiente de execução → Alterar tipo*).
+Para rodar, basta executar todas as células. Em CPU leva cerca de 10 h; no Colab dá para ligar a GPU.
 
-**Protocolo**
-- Dados: `torchvision.datasets.SVHN`, `split="train"` (73.257 imagens) e `split="test"` (26.032).
-- O `train` é dividido em **90% treino / 10% validação**, com divisão fixa pela semente 42.
-- A validação acompanha os experimentos e escolhe o modelo (e a melhor época de cada treino, por checkpoint).
-- O `test` só é usado para relatar o desempenho de cada experimento; **não** participa de nenhuma escolha.
-- O **modelo final é uma rede totalmente conectada (MLP)**, como definido pelo professor. A CNN (E12 e E13) entra
-  apenas como comparação e não concorre à escolha do modelo final.
-- Depois de escolhida a configuração, o modelo final é retreinado com todo o `train` (treino + validação), como o enunciado permite.
-- O conjunto adicional do professor é usado **apenas** na última seção, com o modelo final já definido.
-- Semente fixa (42) em tudo: rodar de novo reproduz os mesmos números na mesma máquina.
+**Como avaliamos**
+- Usamos os splits `train` (73.257 imagens) e `test` (26.032) do `torchvision.datasets.SVHN`.
+- Separamos 10% do `train` para validação, com a semente 42.
+- Todas as escolhas (experimento, melhor época, raio da predição) são feitas pela validação. O teste só mostra o
+  resultado de cada experimento.
+- O modelo final tem que ser uma MLP, então a CNN (E12 e E13) fica só como comparação.
+- No fim, o modelo escolhido é treinado de novo com o `train` inteiro.
+- O conjunto adicional só é usado na última seção, para gerar as predições.
+- A semente é 42 em tudo, então rodar de novo dá os mesmos números.
 """)
 
 md(r"""
 ## 0. Implementação (`svhn_lib.py`)
 
-Todo o código reaproveitável fica nesta célula, que grava o arquivo `svhn_lib.py`. Partimos dos notebooks da aula
-(classificador linear e MLP) e adaptamos ao SVHN: entrada de 3×32×32 = 3072 valores, divisão treino/validação e
-registro de loss e acurácia por época. O arquivo também é coberto por testes automatizados (`tests/`).
+Partimos do código das aulas (classificador linear e MLP) e adaptamos para o SVHN. O arquivo tem:
+
+- `load_svhn`: carrega `train` e `test` como tensores `uint8` no formato (N, 3, 32, 32). Se os `.mat` de Stanford
+  não estiverem na pasta, lê os mesmos dados de uma cópia em parquet (`data_hf/`).
+- `split_train_val`: separa treino e validação com a semente.
+- `compute_norm_stats`: média e desvio de cada canal, calculados só no treino. As somas são feitas com inteiros
+  porque, em float32, o resultado mudava na 7ª casa decimal entre execuções, e isso já mudava o treino.
+- `preprocess` e `per_image_norm`: passam os pixels para [0, 1] e normalizam por canal; o `per_image_norm`
+  normaliza cada imagem pela própria média e desvio.
+- `random_shift` e `random_affine`: augmentation (translação; rotação e escala). Não usamos espelhamento porque
+  ele muda alguns dígitos.
+- `LinearClassifier`, `MLP` e `CNN`: os modelos. Na `MLP`, cada camada oculta é Linear → BatchNorm (opcional) →
+  ReLU → Dropout (opcional).
+- `train_model`: laço de treino. Guarda loss e acurácia de treino e validação a cada época e, no fim, volta para os
+  pesos da época com a melhor acurácia de validação. Sem validação (treino final), fica com a última época.
+- `evaluate`, `predict` e `predict_tta`: avaliação e predição. O `predict_tta` faz a média das probabilidades da
+  imagem deslocada alguns pixels (seção 5).
+- `load_image_folder` e `write_results`: leem as imagens de uma pasta em ordem do nome e gravam uma predição por
+  linha.
+
+O arquivo também tem testes automatizados em `tests/`.
 """)
 code("%%writefile svhn_lib.py\n" + (ROOT / "svhn_lib.py").read_text())
 
@@ -88,12 +103,12 @@ dist.index.name = 'dígito'; dist
 """)
 
 md(r"""
-**Pré-processamento.** Três versões dos dados:
-- `bruto`: pixels em [0, 1] (como no notebook da aula, só `ToTensor`).
-- `norm`: subtrai a média e divide pelo desvio padrão **de cada canal de cor**, calculados só no treino
-  (slide de pré-processamento: "subtraia a média por canal"). Validação e teste usam os mesmos valores, sem vazamento.
-- `norm_img`: a versão `norm` seguida de uma normalização **por imagem** (subtrai a média e divide pelo desvio da
-  própria imagem). Usada só a partir do E16; remove diferenças de brilho e contraste entre as fotos.
+**Pré-processamento.** Usamos três versões dos dados:
+- `bruto`: pixels em [0, 1], como no notebook da aula.
+- `norm`: subtrai a média e divide pelo desvio de cada canal de cor, calculados só no treino (como no slide de
+  pré-processamento). Validação e teste usam os mesmos valores.
+- `norm_img`: a `norm` seguida de uma normalização por imagem (cada imagem pela própria média e desvio). Só é usada
+  a partir do E16.
 """)
 
 code(r"""
@@ -112,8 +127,8 @@ DATA['norm_img'] = {k: (L.per_image_norm(v) if k.startswith('X_') else v) for k,
 """)
 
 md(r"""
-**Checagem de sanidade (da aula de loss).** Com pesos iniciais aleatórios, as 10 classes são quase equiprováveis,
-então a cross-entropy inicial deve ficar perto de $\ln 10 \approx 2{,}303$ e a acurácia perto de 10%.
+**Checagem de sanidade (aula de loss).** Com os pesos aleatórios do início, a loss deve ficar perto de
+$\ln 10 \approx 2{,}303$ e a acurácia perto de 10%.
 """)
 code(r"""
 L.set_seed(SEED)
@@ -125,12 +140,11 @@ for nome, m in [('Linear', L.LinearClassifier()), ('MLP 2×500', L.MLP([500, 500
 md(r"""
 ## 2. Função que roda um experimento
 
-Para cada experimento: fixa a semente, cria o modelo, treina registrando **loss e acurácia de treino e de validação
-a cada época**, fica com os pesos da melhor época na validação, mede a acurácia no teste e salva o histórico
+A função `run` treina o modelo, avalia no teste com os pesos da melhor época na validação e salva o histórico
 (`resultados/*.json`), as curvas (`resultados/*.png`) e os pesos (`pesos/*.pt`).
 
-> A acurácia de treino é a média ao longo da época, com dropout e augmentation ativos. Validação e teste são medidos
-> com o modelo em modo `eval`.
+Obs.: a acurácia de treino é a média da época, com dropout e augmentation ligados. Por isso ela às vezes fica abaixo
+da de validação.
 """)
 
 code(r"""
@@ -235,7 +249,6 @@ segundo a acurácia de validação. A escolha é feita pelo código, não à mã
 """)
 code(r"""
 def melhor(*exps):
-    "Experimento com a maior acurácia de validação entre os indicados."
     return max((r for r in RESULTS if r['exp'] in exps), key=lambda r: r['val_acc'])
 
 B_LR = melhor(3, 4, 5)
@@ -411,8 +424,7 @@ ax[0].legend(fontsize=6.5, ncol=2); plt.tight_layout(); plt.savefig('resultados/
 
 md(r"""
 ## 5. Escolha do modelo
-Critério: **maior acurácia de validação entre as redes totalmente conectadas** (o professor definiu que o modelo
-final deve ser uma MLP; a CNN fica como comparação). O teste não participa da escolha.
+Escolhemos a MLP com a maior acurácia de validação. A CNN não entra porque o modelo final precisa ser uma MLP.
 """)
 code(r"""
 CNNS = (12, 13)
@@ -424,11 +436,10 @@ print(f"Comparação: a melhor CNN (E{cnn['exp']}) tem val_acc = {cnn['val_acc']
 """)
 
 md(r"""
-### Predição com média sobre translações (test-time augmentation)
-A MLP não é invariante a translação. Na hora de predizer, em vez de passar a imagem uma única vez, passamos também
-as versões deslocadas de −r a +r pixels em cada direção e fazemos a **média das probabilidades**. Os pesos não
-mudam; só a forma de predizer. O raio r (0 = sem média, 1 = 9 translações, 2 = 25 translações) é escolhido pela
-**validação**.
+### Média sobre translações na predição
+A MLP não é invariante a translação. Então, na hora de predizer, passamos cada imagem várias vezes, deslocada de −r
+a +r pixels em cada direção, e tiramos a média das probabilidades. Os pesos continuam os mesmos. O raio r foi
+escolhido pela validação (r = 0 é a predição normal, r = 1 usa 9 posições e r = 2 usa 25).
 """)
 code(r"""
 make_model, dados_best, kw_best = REGISTRY[best['exp']]
@@ -450,19 +461,16 @@ with open('resultados/melhor_modelo.json', 'w') as f:
 """)
 
 md(r"""
-## 6. Modelo final: retreino com todo o conjunto de treino
+## 6. Modelo final
 
-O enunciado permite que a versão final use todo o `train`. Com a configuração já escolhida pela validação
-(arquitetura, hiperparâmetros, número de épocas e raio da média sobre translações), retreinamos o modelo com
-**treino + validação (73.257 imagens)**, com a mesma semente. Nada é ajustado nesta etapa: não há mais validação,
-e o modelo fica com os pesos da última época (a taxa de aprendizado termina perto de zero, então o fim do treino
-é estável). O teste continua servindo só para relatar o resultado.
+O enunciado deixa usar todo o `train` na versão final. Treinamos de novo a configuração escolhida, sem mudar nada
+(mesmas épocas, mesma semente, mesmo raio), agora com as 73.257 imagens. Como não tem mais validação, ficamos com
+os pesos da última época; no fim do treino a taxa de aprendizado já está perto de zero.
 """)
 code(r"""
-mean_f, std_f = L.compute_norm_stats(X_all)   # estatísticas de todo o treino
+mean_f, std_f = L.compute_norm_stats(X_all)
 
 def prep(X):
-    "Mesmo pré-processamento do experimento escolhido, com as estatísticas de todo o treino."
     if dados_best == 'bruto':
         return L.preprocess(X)
     Xf = L.preprocess(X, mean_f, std_f)
@@ -518,11 +526,10 @@ with open('resultados/final_confusao.json', 'w') as f:
 
 md(r"""
 ## 7. Predição do conjunto adicional
-Feita **somente agora**, com o modelo final já definido. O pré-processamento é o mesmo do treino do modelo final
-(mesma média e desvio, mesma média sobre translações). As imagens são lidas em **ordem do nome do arquivo** (ordenação numérica: `2.png` antes de
-`10.png`), e o arquivo de saída tem um inteiro de 0 a 9 por linha, na mesma ordem.
+Usamos o modelo final com o mesmo pré-processamento e a mesma média sobre translações. As imagens são lidas em
+ordem do nome do arquivo e o resultado tem uma predição por linha, na mesma ordem.
 
-As imagens do professor devem estar na pasta `extra/` (conteúdo de `images.zip`).
+As imagens estão em `extra/`.
 """)
 code(r"""
 NOMES = 'JOAOPEDRO_SAMYR_VALBER'

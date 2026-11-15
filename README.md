@@ -1,18 +1,31 @@
-# SVHN com redes totalmente conectadas (PyTorch)
+# Classificação de Dígitos no SVHN com MLP (PyTorch)
 
-Até onde dá para levar uma **MLP** (rede só com camadas lineares, sem convolução) na classificação de dígitos do
-[SVHN](http://ufldl.stanford.edu/housenumbers/)? Este repositório registra o caminho, um experimento de cada vez:
-de um classificador linear com 24% de acurácia até uma MLP com **93,9% no teste**, com uma CNN pequena (96,3%) como
-referência.
+Trabalho final da disciplina de **Inteligência Artificial** (UFMS, 2026/2).
 
-Tudo roda em CPU, com semente fixa, e os resultados são reproduzíveis bit a bit na mesma máquina.
+**Integrantes:** João Pedro Santos de Brito, Samyr Arruda Villanova e Valber Oliveira da Conceição
+
+Treinamos um classificador linear, várias MLPs e, como comparação, uma CNN no dataset
+[SVHN](http://ufldl.stanford.edu/housenumbers/), em 17 experimentos encadeados pela acurácia de validação. O
+modelo final é uma **MLP com 93,92% de acurácia no conjunto de teste**.
+
+## Entregáveis
+
+| Entregável pedido no enunciado | Arquivo |
+|---|---|
+| Código e experimentos | [`trabalho_svhn.ipynb`](trabalho_svhn.ipynb), executado e com todas as saídas |
+| Relatório em PDF | [`relatorio.pdf`](relatorio.pdf) |
+| Pesos do melhor modelo | [`melhor_modelo.pt`](melhor_modelo.pt) (75 MB) |
+| Predições do conjunto adicional | [`JOAOBRITO_SAMYRARRUDA_VALBERCONCEICAO_RESULTS.txt`](JOAOBRITO_SAMYRARRUDA_VALBERCONCEICAO_RESULTS.txt), 203.856 linhas |
+
+O notebook é autossuficiente: a primeira célula grava o [`svhn_lib.py`](svhn_lib.py), que as células seguintes
+importam. O arquivo `.py` está no repositório só por conveniência.
 
 ## Resultados
 
 | Exp. | O que mudou | Validação | Teste |
 |---|---|---|---|
 | E1 | Classificador linear | 28,83% | 24,02% |
-| E2 | MLP 2×500, entrada em [0, 1] | 58,35% | 55,01% |
+| E2 | MLP 2×500 da aula, entrada em [0, 1] | 58,35% | 55,01% |
 | E3 | E2 + normalização por canal | 83,03% | 79,48% |
 | E4 | E3 com lr 1e-2 | 19,70% | 19,59% |
 | E5 | E3 com lr 1e-4 | 86,19% | 83,45% |
@@ -22,51 +35,54 @@ Tudo roda em CPU, com semente fixa, e os resultados são reproduzíveis bit a bi
 | E9 | E8 com lr 1e-3 | 87,01% | 84,39% |
 | E10 | E8 com batch 256 | 86,99% | 83,98% |
 | E11 | E8 + lr com decaimento cosseno | 87,78% | 85,46% |
-| E12 | CNN pequena (referência) | 95,45% | 95,17% |
-| E13 | E12 + translação aleatória (referência) | 95,80% | 96,27% |
+| E12 | CNN pequena (só comparação) | 95,45% | 95,17% |
+| E13 | E12 + translação aleatória (só comparação) | 95,80% | 96,27% |
 | E14 | E11 + translação aleatória de ±2 px | 87,84% | 86,21% |
 | E15 | E14 com rede 4×2048, dropout 0,1, 60 épocas, lr one-cycle | 92,22% | 90,50% |
 | E16 | E15 + normalização de contraste por imagem | 93,23% | 91,69% |
 | **E17** | **E16 + rotação e escala (melhor MLP)** | **93,54%** | **92,39%** |
 | | E17 + média sobre 25 translações na predição | 94,32% | 93,48% |
-| **Final** | **E17 retreinado com todo o treino, com a média** | — | **93,92%** |
+| **Final** | **E17 retreinado com todo o treino, com a média** | | **93,92%** |
 
-As curvas de cada experimento estão em [`resultados/`](resultados/) e a análise completa em
-[`relatorio.pdf`](relatorio.pdf).
+Conforme orientação do professor, o modelo final precisa ser uma rede totalmente conectada, por isso a CNN (E12 e
+E13) aparece apenas como comparação. A análise completa, com as curvas de loss e acurácia de cada experimento, está
+no [`relatorio.pdf`](relatorio.pdf).
 
 ![Acurácia e loss de validação de todos os experimentos](resultados/comparacao_validacao.png)
 
-## O que aprendi
+## Protocolo
 
-- **Normalizar a entrada vale mais do que qualquer mudança de arquitetura.** Subtrair a média e dividir pelo desvio
-  de cada canal levou a mesma MLP de 58% para 83%.
-- **A taxa de aprendizado "padrão" pode estar errada para o seu problema.** Com 1e-3 a MLP sofria overfitting cedo;
-  com 1e-4 ganhou 3 pontos; com 1e-2 colapsou e passou a responder sempre o dígito mais frequente.
-- **Ler a diferença entre treino e validação diz o que fazer em seguida.** Treino muito acima da validação pede
-  regularização (dropout resolveu). Treino *abaixo* da validação, como aconteceu ao ligar a augmentation, pede o
-  contrário: mais capacidade e mais épocas. Foi esse diagnóstico que rendeu o maior salto da MLP (+4,4 pontos).
-- **Uma MLP não sabe que um dígito deslocado é o mesmo dígito.** Augmentation no treino e média das probabilidades
-  sobre pequenas translações na predição compensam parte disso (+0,8 ponto só com a média, sem mudar os pesos).
-- **Normalização por imagem** (cada foto pela própria média e desvio) remove variações de brilho e contraste: +1 ponto.
-- **A arquitetura certa ainda ganha.** Uma CNN com 23 vezes menos parâmetros supera a melhor MLP em 2,4 pontos no
-  teste, sem nenhum dos truques acima.
-- **Semente fixa não basta para reproduzir.** A média de 67 milhões de valores em float32 mudava na 7ª casa conforme
-  o layout de memória, e isso bastava para alterar o treino. Somas inteiras exatas resolveram.
-- **Um fator por experimento, e a validação decide.** Cada experimento parte do melhor anterior na validação; o
-  conjunto de teste só é usado para relatar.
+O split `train` do `torchvision.datasets.SVHN` foi dividido em 90% para treino e 10% para validação, com semente
+42. Todas as escolhas (experimento, época de parada, raio da média sobre translações) foram feitas pela validação, e
+o split `test` serve apenas para relatar o desempenho. Depois de escolhida a configuração, o modelo final foi
+retreinado com todo o `train`, como o enunciado permite. O conjunto adicional do professor não está neste
+repositório e foi usado somente para gerar o arquivo de predições, com o modelo já definido.
 
-## Estrutura
+## Principais conclusões
 
-| Caminho | Conteúdo |
-|---|---|
-| `trabalho_svhn.ipynb` | Notebook executado, com todos os experimentos e saídas |
-| `svhn_lib.py` | Modelos, laço de treino, augmentation, avaliação e predição |
-| `tests/` | 29 testes automatizados da biblioteca |
-| `tools/build_notebook.py` | Gera o notebook a partir da biblioteca |
-| `tools/gerar_relatorio.py`, `tools/relatorio_texto.py` | Geram o `relatorio.pdf` a partir de `resultados/` |
-| `tools/verificar.py` | Re-treina dois experimentos e confere os pesos e as predições |
-| `resultados/` | Histórico (JSON), curvas e tabelas de cada experimento |
-| `melhor_modelo.pt` | Pesos da MLP final, com a normalização e a configuração |
+- A normalização da entrada por canal foi a mudança de maior impacto, levando a mesma MLP de 58% para 83%.
+- A taxa de aprendizado do notebook da aula (1e-3) era alta demais para o problema, enquanto 1e-4 ganhou 3 pontos e
+  1e-2 fez o treino colapsar.
+- Com dropout e augmentation, a acurácia de treino ficou abaixo da de validação, sinal de underfitting, e aumentar a
+  rede e o tempo de treino rendeu o maior salto da MLP (+4,4 pontos).
+- Como a MLP não é invariante a translação, a augmentation no treino e a média das probabilidades sobre pequenos
+  deslocamentos na predição compensaram parte dessa limitação.
+- Mesmo assim, a CNN, com 23 vezes menos parâmetros, ficou 2,4 pontos acima da melhor MLP no teste.
+
+## Como usar o modelo final
+
+```python
+import torch
+import svhn_lib as L
+
+ck = torch.load("melhor_modelo.pt")
+modelo = L.MLP(**ck["arquitetura"])
+modelo.load_state_dict(ck["state_dict"])
+
+nomes, X = L.load_image_folder("pasta_com_as_imagens")
+X = L.per_image_norm(L.preprocess(X, ck["mean"], ck["std"]))
+pred = L.predict_tta(modelo, X, ck["tta_raio"])
+```
 
 ## Como reproduzir
 
@@ -74,14 +90,22 @@ As curvas de cada experimento estão em [`resultados/`](resultados/) e a anális
 uv venv .venv
 uv pip install --python .venv/bin/python torch torchvision --index-url https://download.pytorch.org/whl/cpu
 uv pip install --python .venv/bin/python numpy pandas matplotlib pillow scipy pyarrow pytest jupyter nbconvert reportlab pypdfium2
-.venv/bin/pytest -q                        # 29 testes
-.venv/bin/jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 trabalho_svhn.ipynb   # ~10 h em CPU
-.venv/bin/python tools/gerar_relatorio.py  # relatorio.pdf
-.venv/bin/python tools/verificar.py        # confere a reprodutibilidade e os arquivos gerados
+.venv/bin/jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 trabalho_svhn.ipynb
 ```
 
-- **Dados:** `torchvision.datasets.SVHN` baixa os splits `train` e `test` em `data/`.
-- **Predição de imagens avulsas:** a última seção do notebook classifica as imagens de uma pasta `extra/` (PNG 32×32)
-  e grava uma predição por linha, em ordem do nome do arquivo.
-- **Semente:** 42 em tudo.
-- **Colab:** basta o notebook; a primeira célula grava `svhn_lib.py`.
+A execução completa leva cerca de 10 horas em CPU. Os dados do SVHN são baixados automaticamente em `data/`, e a
+última seção do notebook classifica as imagens que estiverem na pasta `extra/`. Com a semente 42, rodar de novo na
+mesma máquina reproduz exatamente os mesmos números.
+
+## Estrutura do repositório
+
+| Caminho | Conteúdo |
+|---|---|
+| `trabalho_svhn.ipynb` | Notebook com a implementação e os 17 experimentos |
+| `svhn_lib.py` | Dados, modelos, treino, augmentation, avaliação e predição |
+| `relatorio.pdf` | Relatório do trabalho |
+| `melhor_modelo.pt` | Pesos da MLP final, com a arquitetura, a normalização e o raio da predição |
+| `JOAOBRITO_SAMYRARRUDA_VALBERCONCEICAO_RESULTS.txt` | Predições do conjunto adicional |
+| `resultados/` | Histórico, curvas e tabelas de cada experimento |
+| `tests/` | Testes automatizados do `svhn_lib.py` (`pytest -q`) |
+| `tools/` | Scripts que geram o notebook e o relatório e conferem os entregáveis |

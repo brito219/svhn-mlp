@@ -532,7 +532,7 @@ ordem do nome do arquivo e o resultado tem uma predição por linha, na mesma or
 As imagens estão em `extra/`.
 """)
 code(r"""
-NOMES = 'JOAOPEDRO_SAMYR_VALBER'
+NOMES = 'JOAOBRITO_SAMYRARRUDA_VALBERCONCEICAO'
 PASTA_EXTRA = 'extra'
 
 if os.path.isdir(PASTA_EXTRA):

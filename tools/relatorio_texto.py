@@ -14,7 +14,7 @@ pct = lambda v: f"{100 * v:.2f}%".replace(".", ",")
 
 AUTORES = "João Pedro Santos de Brito · Samyr Arruda Villanova · Valber Oliveira da Conceição"
 DISCIPLINA = "Trabalho Final de Inteligência Artificial"
-ARQ_RESULTADOS = "JOAOPEDRO_SAMYR_VALBER_RESULTS.txt"
+ARQ_RESULTADOS = "JOAOBRITO_SAMYRARRUDA_VALBERCONCEICAO_RESULTS.txt"
 
 SOLUCAO = [
     "Implementamos em PyTorch um classificador linear, várias MLPs (redes totalmente conectadas) e, como "

@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 import svhn_lib as L  # noqa: E402
 
 SEED = 42
-NOMES = "JOAOPEDRO_SAMYR_VALBER"
+NOMES = "JOAOBRITO_SAMYRARRUDA_VALBERCONCEICAO"
 ok = True
 
 

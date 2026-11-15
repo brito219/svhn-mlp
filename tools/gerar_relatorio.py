@@ -45,9 +45,27 @@ def bullets(items):
     return [para(f"• {it}") for it in items]
 
 
+FIG_REL = RES / "relatorio"
+
+
+def figuras_sem_travessao():
+    import matplotlib
+    matplotlib.use("Agg")
+    sys.path.insert(0, str(ROOT))
+    import svhn_lib as L
+    FIG_REL.mkdir(exist_ok=True)
+    for e in (1, 2, 3, 13, 14, 17):
+        d = json.load(open(RES / f"E{e}.json"))
+        L.plot_history(d["hist"], f"E{e}: {d['row']['nome']}", FIG_REL / f"E{e}_curvas.png")
+    L.plot_history(final["hist"], "Modelo final, retreino com treino e validação", FIG_REL / "final_curvas.png")
+
+
+figuras_sem_travessao()
+
+
 def fig(name, caption, width=W):
     from PIL import Image as PI
-    path = RES / name
+    path = FIG_REL / name if (FIG_REL / name).exists() else RES / name
     w, h = PI.open(path).size
     return KeepTogether([Image(str(path), width=width, height=width * h / w), para(caption, CAP), Spacer(1, 5)])
 
@@ -83,7 +101,7 @@ story += [para("Classificação de Dígitos no Dataset SVHN", TITLE),
 story.append(para("1. Solução desenvolvida", H1))
 story += [para(t) for t in T.SOLUCAO]
 story.append(para("Protocolo de avaliação", H2))
-story += bullets(T.PROTOCOLO)
+story += [para(t) for t in T.PROTOCOLO]
 
 story.append(para("Modelos utilizados", H2))
 mod = [["Modelo", "Experimentos", "Arquitetura", "Parâmetros"]]
@@ -118,7 +136,7 @@ tab = [["Exp.", "Modificação", "Loss\ntreino", "Loss\nval.", "Acc.\ntreino", "
         "Δ val.", "Resultado"]]
 for r in rows:
     pai = r.get("pai")
-    d = "—" if pai is None else f"{100 * (r['val_acc'] - rows[pai - 1]['val_acc']):+.2f} pp".replace(".", ",")
+    d = "ref." if pai is None else f"{100 * (r['val_acc'] - rows[pai - 1]['val_acc']):+.2f} pp".replace(".", ",")
     tab.append([f"E{r['exp']}", para(r["modificacao"].replace("0.0001", "1e-4").replace("0.001", "1e-3"), SMALL), num(r["train_loss"]), num(r["val_loss"]),
                 pct(r["train_acc"]), pct(r["val_acc"]), pct(r["test_acc"]), d, para(T.VEREDITO[r["exp"]], SMALL)])
 story.append(table(tab, [1.0 * cm, 3.7 * cm, 1.2 * cm, 1.2 * cm, 1.5 * cm, 1.5 * cm, 1.5 * cm, 1.7 * cm, 3.7 * cm],
@@ -133,7 +151,7 @@ story.append(para(T.CURVAS_INTRO))
 n_fig = 0
 for arquivo, legenda, txt, largura in T.CURVAS:
     n_fig += 1
-    story.append(fig(arquivo, f"Figura {n_fig} — {legenda}", width=W * largura))
+    story.append(fig(arquivo, f"Figura {n_fig}. {legenda}", width=W * largura))
     if txt:
         story.append(para(txt))
         story.append(Spacer(1, 4))
@@ -142,7 +160,7 @@ for arquivo, legenda, txt, largura in T.CURVAS:
 story.append(para("4. Melhor solução", H1))
 story += [para(t) for t in T.MELHOR]
 mb = [["Item", "Valor"],
-      ["Modelo", f"E{best['exp']} — {best['nome']}"],
+      ["Modelo", f"E{best['exp']}, {best['nome']}"],
       ["Arquitetura", para(T.MELHOR_ARQ, SMALL)],
       ["Hiperparâmetros", para(T.MELHOR_HP, SMALL)],
       [f"Acurácia de validação (E{best['exp']}, seleção)", f"{pct(best['val_acc'])} (época {best['melhor_epoca']} de {best['epocas']})"],
@@ -153,7 +171,7 @@ mb = [["Item", "Valor"],
       ["Pesos do modelo final", "melhor_modelo.pt"]]
 story.append(table(mb, [6.2 * cm, 10.8 * cm], center_from=9))
 n_fig += 1
-story.append(fig("final_confusao.png", f"Figura {n_fig} — Matriz de confusão do modelo final no conjunto de teste.",
+story.append(fig("final_confusao.png", f"Figura {n_fig}. Matriz de confusão do modelo final no conjunto de teste.",
                  width=W * 0.47))
 story += [para(t) for t in T.MELHOR_ERROS]
 
@@ -161,9 +179,9 @@ story += [para(t) for t in T.MELHOR_ERROS]
 story.append(para("5. Conclusão", H1))
 story += [para(t) for t in T.CONCLUSAO]
 story.append(para("Principais dificuldades", H2))
-story += bullets(T.DIFICULDADES)
+story += [para(t) for t in T.DIFICULDADES]
 story.append(para("Entregáveis", H2))
-story += bullets(T.ENTREGAVEIS)
+story += [para(t) for t in T.ENTREGAVEIS]
 
 
 def rodape(canvas, doc):
@@ -174,6 +192,6 @@ def rodape(canvas, doc):
 
 
 SimpleDocTemplate(str(ROOT / "relatorio.pdf"), pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
-                  topMargin=1.7 * cm, bottomMargin=1.8 * cm, title="Relatório — Classificação de Dígitos no SVHN",
+                  topMargin=1.7 * cm, bottomMargin=1.8 * cm, title="Classificação de Dígitos no Dataset SVHN",
                   author=T.AUTORES).build(story, onFirstPage=rodape, onLaterPages=rodape)
 print("relatorio.pdf gerado")
